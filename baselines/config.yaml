@@ -1,0 +1,75 @@
+run_name: qwen3_4b_2d_painting
+seed: 1234
+
+dataset:
+  # Path is resolved relative to this config file.
+  root: ../dataset
+  include_glob: "**/*.json"
+  exclude_glob:
+    - "**/README.md"
+
+output:
+  # Path is resolved relative to this config file.
+  path: outputs/qwen3_4b_2d_painting.jsonl
+  overwrite: false
+  write_prompt: true
+  write_task: true
+
+model:
+  backend: transformers
+  # Some repos may be gated on Hugging Face (401/404) unless you accepted the license.
+  # If you hit auth errors, try a public snapshot like:
+  # - Qwen/Qwen3-4B-Instruct-2507
+  # - Qwen/Qwen3-4B-Base
+  # Or set this to a local path.
+  model_name_or_path: Qwen/Qwen3-4B-Instruct-2507
+  tokenizer_name_or_path: null
+  trust_remote_code: true
+  revision: null
+  dtype: bfloat16 # one of: float16, bfloat16, float32
+  device_map: auto # e.g. auto, cuda:0, cpu
+  load_in_4bit: false
+  load_in_8bit: false
+
+generation:
+  use_chat_template: true
+  max_new_tokens: 2048
+  do_sample: true
+  temperature: 0.2
+  top_p: 0.95
+  repetition_penalty: 1.05
+  num_return_sequences: 1
+
+prompt:
+  system: |
+    You are a Minecraft building agent.
+    Output must be valid JSON only (no markdown, no code fences, no extra text).
+  user_template: |
+    You are given a target 2D painting to build in Minecraft as a 16x16x1 wall.
+
+    Coordinates:
+    - Use the given bbox with integer coordinates (x,y,z).
+    - This dataset uses a vertical wall at z=0: x in [0..15], y in [0..15], z=0.
+
+    Allowed blocks (palette):
+    {palette_map}
+
+    Target grid (16 rows, each 16 digits; digit is an index into the palette above):
+    {grid_rows}
+
+    Task JSON (for reference):
+    {task_json}
+
+    Produce a single JSON object with this schema:
+    {{
+      "role": "builder",
+      "ops": [
+        {{"cmd":"setblock","pos":[x,y,z],"block":"<block_id>"}},
+        {{"cmd":"fill","from":[x1,y1,z1],"to":[x2,y2,z2],"block":"<block_id>"}}
+      ]
+    }}
+
+    Constraints:
+    - Only use blocks from the palette.
+    - Every coordinate must be within the bbox.
+    - Prefer fewer ops (use fill when appropriate).

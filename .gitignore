@@ -4,3 +4,7 @@ __pycache__/
 # Node
 node_modules/
 
+# Baselines
+baselines/outputs/
+baselines/slurm_logs/
+baselines/run.sh

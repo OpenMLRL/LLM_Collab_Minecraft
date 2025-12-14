@@ -37,3 +37,9 @@ Important: `op executor_bot` is a Minecraft server/admin command (not a bash com
 3) Run the smoke test from `LLM_Collab_MC/`:
 
 `python3 test/test_env.py --host 127.0.0.1 --port 25565 --username executor_bot`
+
+## Baselines (offline inference)
+
+- Edit config: `baselines/config.yaml`
+- Run locally (writes a `.jsonl`): `python3 baselines/main.py --config baselines/config.yaml`
+- Slurm: copy `baselines/run.example.sh` to `baselines/run.sh` (ignored by git), then `bash baselines/run.sh baselines/config.yaml`
