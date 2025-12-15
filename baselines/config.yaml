@@ -21,6 +21,7 @@ model:
   # If you hit auth errors, try a public snapshot like:
   # - Qwen/Qwen3-4B-Instruct-2507
   # - Qwen/Qwen3-4B-Base
+  # - Qwen/Qwen3-8B
   # Or set this to a local path.
   model_name_or_path: Qwen/Qwen3-4B-Instruct-2507
   tokenizer_name_or_path: null

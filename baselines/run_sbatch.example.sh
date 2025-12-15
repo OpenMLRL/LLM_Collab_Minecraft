@@ -46,6 +46,7 @@ MC_XMX="${MC_XMX:-1G}"
 
 # Baseline args
 EXTRA_ARGS="${EXTRA_ARGS:-}" # e.g. EXTRA_ARGS="--limit 1"
+OUTPUT_FORMAT="${OUTPUT_FORMAT:-auto}" # auto | jsonl | json
 
 if [[ -z "${ACCOUNT}" || -z "${PARTITION}" || "${ACCOUNT}" == "..." || "${PARTITION}" == "..." || "${ACCOUNT}" == "YOUR_ACCOUNT" || "${PARTITION}" == "YOUR_PARTITION" ]]; then
   echo "ERROR: set ACCOUNT and PARTITION (env vars) for sbatch." >&2
@@ -71,7 +72,7 @@ sbatch \
   --time="${TIME}" \
   --job-name="${JOB_NAME}" \
   --output="${SLURM_LOG_DIR}/%x-%j.out" \
-  --export=ALL,REPO_DIR="${REPO_DIR}",BASE_CONFIG_PATH="${BASE_CONFIG_PATH}",CONDA_ENV="${CONDA_ENV}",BASHRC_PATH="${BASHRC_PATH}",MC_DIR="${MC_DIR}",MC_JAR="${MC_JAR}",MC_PORT="${MC_PORT}",BOT_USERNAME="${BOT_USERNAME}",MC_XMS="${MC_XMS}",MC_XMX="${MC_XMX}",EXTRA_ARGS="${EXTRA_ARGS}" \
+  --export=ALL,REPO_DIR="${REPO_DIR}",BASE_CONFIG_PATH="${BASE_CONFIG_PATH}",CONDA_ENV="${CONDA_ENV}",BASHRC_PATH="${BASHRC_PATH}",MC_DIR="${MC_DIR}",MC_JAR="${MC_JAR}",MC_PORT="${MC_PORT}",BOT_USERNAME="${BOT_USERNAME}",MC_XMS="${MC_XMS}",MC_XMX="${MC_XMX}",EXTRA_ARGS="${EXTRA_ARGS}",OUTPUT_FORMAT="${OUTPUT_FORMAT}" \
   <<'SBATCH'
 #!/usr/bin/env bash
 set -eo pipefail
@@ -236,7 +237,31 @@ PY
 # Create a temp config that forces minecraft.enabled=true and uses absolute paths.
 TMP_DIR="${SLURM_TMPDIR:-/tmp}"
 CFG="${TMP_DIR}/llm_collab_mc_${SLURM_JOB_ID:-$$}.yaml"
-OUT_PATH="${REPO_DIR}/baselines/outputs/${SLURM_JOB_NAME:-llm_collab_mc_mc}-${SLURM_JOB_ID:-$$}.jsonl"
+
+OUT_EXT="$(python3 - <<'PY'
+import os
+from pathlib import Path
+
+fmt = (os.environ.get("OUTPUT_FORMAT") or "auto").strip().lower()
+if fmt in {"jsonl", "json"}:
+    print(fmt)
+    raise SystemExit(0)
+
+base = Path(os.environ["BASE_CONFIG_PATH"])
+try:
+    import yaml  # type: ignore
+
+    cfg = yaml.safe_load(base.read_text(encoding="utf-8")) or {}
+    out = (cfg.get("output") or {}).get("path")
+    out = str(out or "")
+    print("jsonl" if out.endswith(".jsonl") else "json")
+except Exception:
+    # Fallback: keep jsonl for robustness.
+    print("jsonl")
+PY
+)"
+
+OUT_PATH="${REPO_DIR}/baselines/outputs/${SLURM_JOB_NAME:-llm_collab_mc_mc}-${SLURM_JOB_ID:-$$}.${OUT_EXT}"
 
 mkdir -p "$(dirname "${OUT_PATH}")"
 

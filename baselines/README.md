@@ -129,7 +129,7 @@ Where to look:
 
 - Slurm stdout: `baselines/slurm_logs/%x-%j.out`
 - Minecraft server log: `${MC_DIR}/logs/server_${SLURM_JOB_ID}.log` (printed in Slurm stdout)
-- Eval output JSONL: `baselines/outputs/${SLURM_JOB_NAME}-${SLURM_JOB_ID}.jsonl` (printed in Slurm stdout)
+- Eval output: `baselines/outputs/${SLURM_JOB_NAME}-${SLURM_JOB_ID}.{jsonl|json}` (printed in Slurm stdout)
 
 This script copies your base config to `$SLURM_TMPDIR` and only overwrites:
 
@@ -139,6 +139,13 @@ This script copies your base config to `$SLURM_TMPDIR` and only overwrites:
 - `minecraft.enabled/host/port/username` → force-enable MC execution on localhost
 
 So you can still edit `generation.max_new_tokens`, sampling params, prompts, etc. in `baselines/config.yaml` normally.
+
+Output format:
+
+- By default, `run_sbatch.sh` follows your base config `output.path` extension:
+  - ends with `.jsonl` → JSONL (one record per line, easiest for large runs)
+  - otherwise → JSON array file
+- You can also force it with: `OUTPUT_FORMAT=jsonl` or `OUTPUT_FORMAT=json`
 
 ### Make a Minecraft server reachable from compute nodes (alternative)
 
