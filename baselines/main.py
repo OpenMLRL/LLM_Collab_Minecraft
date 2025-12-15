@@ -653,6 +653,8 @@ def _generate_with_transformers(
     loaded: LoadedModel,
     prompt_text: str,
     generation_cfg: dict[str, Any],
+    *,
+    stream_output: bool = False,
 ) -> list[str]:
     import torch  # type: ignore
 
@@ -686,10 +688,27 @@ def _generate_with_transformers(
     if tokenizer.eos_token_id is not None:
         gen_kwargs.setdefault("eos_token_id", tokenizer.eos_token_id)
 
+    streamer = None
+    if stream_output:
+        try:
+            from transformers import TextStreamer  # type: ignore
+
+            class _StderrStreamer(TextStreamer):  # type: ignore[misc]
+                def on_finalized_text(self, text: str, stream_end: bool = False) -> None:  # type: ignore[override]
+                    sys.stderr.write(text)
+                    if stream_end:
+                        sys.stderr.write("\n")
+                    sys.stderr.flush()
+
+            streamer = _StderrStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True)
+        except Exception:
+            streamer = None
+
     with torch.inference_mode():
         out_ids = model.generate(
             input_ids=input_ids,
             attention_mask=attention_mask,
+            **({"streamer": streamer} if streamer is not None else {}),
             **gen_kwargs,
         )
 
@@ -707,6 +726,32 @@ def main() -> int:
     parser.add_argument("--config", type=str, default=str(default_config))
     parser.add_argument("--limit", type=int, default=None, help="Only run first N tasks.")
     parser.add_argument("--dry-run", action="store_true", help="Load tasks and print prompts without loading the model.")
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Print per-stage progress logs (useful when debugging slow runs).",
+    )
+    parser.add_argument(
+        "--print-llm-output",
+        action="store_true",
+        help="Print raw model output text to stderr for each sample (debug).",
+    )
+    parser.add_argument(
+        "--print-llm-output-max-chars",
+        type=int,
+        default=4000,
+        help="Max chars to print for --print-llm-output (0 = unlimited).",
+    )
+    parser.add_argument(
+        "--print-commands",
+        action="store_true",
+        help="Print validated Minecraft commands (accepted/rejected counts) to stderr (debug).",
+    )
+    parser.add_argument(
+        "--stream-llm-output",
+        action="store_true",
+        help="Stream decoded tokens to stderr during generation (debug; can be very verbose).",
+    )
     args = parser.parse_args()
 
     config_path = Path(args.config).expanduser().resolve()
@@ -811,6 +856,37 @@ def main() -> int:
     _eprint(f"Loaded model: {loaded.model_id}")
     _eprint(f"Tasks: {len(task_paths)}")
     _eprint(f"Output: {output_path}")
+    if args.verbose:
+        try:
+            import torch  # type: ignore
+
+            _eprint(
+                "Torch: "
+                f"version={torch.__version__} "
+                f"cuda_version={getattr(torch.version, 'cuda', None)} "
+                f"cuda_available={torch.cuda.is_available()} "
+                f"device_count={torch.cuda.device_count()}"
+            )
+            if getattr(torch.version, "cuda", None) in (None, "None") and "+cpu" in str(torch.__version__):
+                _eprint(
+                    "WARNING: CPU-only PyTorch detected (torch.version.cuda is None). "
+                    "Generation will be extremely slow; install a CUDA-enabled PyTorch build."
+                )
+            if torch.cuda.is_available():
+                _eprint(f"CUDA: device0={torch.cuda.get_device_name(0)}")
+        except Exception:
+            pass
+        try:
+            from collections import Counter
+
+            dm = getattr(loaded.model, "hf_device_map", None)
+            if isinstance(dm, dict):
+                counts = Counter(str(v) for v in dm.values())
+                _eprint(f"HF device map: {dict(counts)}")
+            else:
+                _eprint(f"Model device: {getattr(loaded.model, 'device', None)}")
+        except Exception:
+            pass
 
     mc_cfg = cfg.get("minecraft") or {}
     if not isinstance(mc_cfg, dict):
@@ -953,11 +1029,28 @@ def main() -> int:
                 use_chat_template=use_chat_template,
             )
 
+            if args.verbose:
+                _eprint(f"[{idx}/{len(task_paths)}] {task_id} generating...")
             t0 = time.time()
-            outputs = _generate_with_transformers(loaded, prompt_text, generation_cfg)
+            if args.stream_llm_output and int(generation_cfg.get("num_return_sequences") or 1) != 1:
+                _eprint("--stream-llm-output only supports num_return_sequences=1; disabling streaming.")
+                stream_output = False
+            else:
+                stream_output = bool(args.stream_llm_output)
+            if stream_output:
+                _eprint(f"--- streaming LLM output task_id={task_id} ---")
+            outputs = _generate_with_transformers(loaded, prompt_text, generation_cfg, stream_output=stream_output)
             dt = time.time() - t0
+            if args.verbose:
+                _eprint(f"[{idx}/{len(task_paths)}] {task_id} generated samples={len(outputs)} dt={dt:.2f}s")
 
             for sample_id, output_text in enumerate(outputs):
+                if args.print_llm_output:
+                    max_chars = int(args.print_llm_output_max_chars or 0)
+                    out = output_text if max_chars <= 0 else output_text[:max_chars]
+                    suffix = "" if max_chars <= 0 or len(output_text) <= max_chars else "\n... [truncated]"
+                    _eprint(f"\n=== LLM output task_id={task_id} sample_id={sample_id} ===\n{out}{suffix}\n")
+
                 lines = _extract_command_lines(output_text)
                 palette = task_obj.get("palette")
                 if not isinstance(palette, list):
@@ -969,6 +1062,13 @@ def main() -> int:
                     world_bbox_to=w_to,
                     max_commands=mc_max_commands,
                 )
+
+                if args.print_commands:
+                    _eprint(
+                        f"[{task_id} sample={sample_id}] accepted={len(accepted_cmds)} rejected={len(rejected_cmds)}"
+                    )
+                    if accepted_cmds:
+                        _eprint("\n".join(accepted_cmds[:50]) + ("\n... [truncated]" if len(accepted_cmds) > 50 else ""))
 
                 mc_result: dict[str, Any] | None = None
                 metrics: dict[str, Any] = {"latency_s": dt}

@@ -33,7 +33,7 @@ model:
 
 generation:
   use_chat_template: true
-  max_new_tokens: 4096
+  max_new_tokens: 512
   do_sample: true
   temperature: 0.2
   top_p: 0.95

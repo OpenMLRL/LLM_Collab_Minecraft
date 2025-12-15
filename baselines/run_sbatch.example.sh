@@ -213,6 +213,26 @@ done
 
 conda activate "${CONDA_ENV}"
 
+# Confirm CUDA torch is available (otherwise generation can take tens of minutes).
+ALLOW_CPU="${ALLOW_CPU:-0}"
+python3 - <<'PY'
+import os
+import torch
+
+print("torch", torch.__version__)
+print("torch.version.cuda", torch.version.cuda)
+print("cuda_available", torch.cuda.is_available())
+print("device_count", torch.cuda.device_count())
+
+allow_cpu = os.environ.get("ALLOW_CPU", "0").lower() in ("1", "true", "yes")
+if not torch.cuda.is_available() and not allow_cpu:
+    raise SystemExit(
+        "ERROR: torch.cuda.is_available() is False in this job. "
+        "Your conda env likely has CPU-only PyTorch (e.g. torch==...+cpu). "
+        "Install a CUDA-enabled PyTorch build or set ALLOW_CPU=1 to proceed on CPU."
+    )
+PY
+
 # Create a temp config that forces minecraft.enabled=true and uses absolute paths.
 TMP_DIR="${SLURM_TMPDIR:-/tmp}"
 CFG="${TMP_DIR}/llm_collab_mc_${SLURM_JOB_ID:-$$}.yaml"
