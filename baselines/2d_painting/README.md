@@ -1,6 +1,6 @@
-# Baselines
+# 2D Painting Baseline
 
-`baselines/main.py` reads tasks from `../dataset`, prompts an LLM once per task to output **Minecraft command lines** (one command per line), then scores the final build result and writes an eval JSON/JSONL file.
+`baselines/2d_painting/main.py` reads tasks from `../../dataset`, prompts an LLM once per task to output **Minecraft command lines** (one command per line), then scores the final build result and writes an eval JSON/JSONL file.
 
 ## Prereqs
 
@@ -20,9 +20,9 @@ Notes:
 From repo root:
 
 - Dry-run (no model load, prints first prompts):
-  - `python3 baselines/main.py --config baselines/config.yaml --dry-run --limit 1`
+  - `python3 baselines/2d_painting/main.py --config baselines/2d_painting/config.yaml --dry-run --limit 1`
 - Real run:
-  - `python3 baselines/main.py --config baselines/config.yaml`
+  - `python3 baselines/2d_painting/main.py --config baselines/2d_painting/config.yaml`
 
 Useful flags:
 
@@ -31,7 +31,7 @@ Useful flags:
 
 ## Output
 
-`output.path` in `baselines/config.yaml` controls the output format:
+`output.path` in `baselines/2d_painting/config.yaml` controls the output format:
 
 - If it ends with `.jsonl`: JSON Lines (one record per line)
 - Otherwise: a single JSON array file
@@ -76,7 +76,7 @@ Or in **in-game chat** (as an admin):
 
 - `/op executor_bot`
 
-3) Enable Minecraft execution in `baselines/config.yaml`
+3) Enable Minecraft execution in `baselines/2d_painting/config.yaml`
 
 Set:
 
@@ -87,7 +87,7 @@ Set:
 
 4) Run
 
-- `python3 baselines/main.py --config baselines/config.yaml --limit 1`
+- `python3 baselines/2d_painting/main.py --config baselines/2d_painting/config.yaml --limit 1`
 
 ## Slurm
 
@@ -95,8 +95,8 @@ Set:
 
 Copy the template and submit:
 
-- `cp baselines/run.example.sh baselines/run.sh`
-- `ACCOUNT=YOUR_ACCOUNT PARTITION=YOUR_PARTITION ./baselines/run.sh baselines/config.yaml`
+- `cp baselines/2d_painting/run.example.sh baselines/2d_painting/run.sh`
+- `ACCOUNT=YOUR_ACCOUNT PARTITION=YOUR_PARTITION ./baselines/2d_painting/run.sh baselines/2d_painting/config.yaml`
 
 Notes:
 
@@ -117,28 +117,28 @@ This avoids all “server reachable from compute nodes” issues by starting the
 
 2) Copy the template (this keeps your Slurm settings out of git)
 
-- `cp baselines/run_sbatch.example.sh baselines/run_sbatch.sh`
-- `chmod +x baselines/run_sbatch.sh`
+- `cp baselines/2d_painting/run_sbatch.example.sh baselines/2d_painting/run_sbatch.sh`
+- `chmod +x baselines/2d_painting/run_sbatch.sh`
 
 3) Submit (examples)
 
-- Minimal: `ACCOUNT=YOUR_ACCOUNT PARTITION=YOUR_PARTITION EXTRA_ARGS="--limit 1" ./baselines/run_sbatch.sh baselines/config.yaml`
-- If your jar lives elsewhere: `MC_DIR=/path/to/mc-server MC_JAR=paper-1.19.2-307.jar ACCOUNT=YOUR_ACCOUNT PARTITION=YOUR_PARTITION ./baselines/run_sbatch.sh baselines/config.yaml`
+- Minimal: `ACCOUNT=YOUR_ACCOUNT PARTITION=YOUR_PARTITION EXTRA_ARGS="--limit 1" ./baselines/2d_painting/run_sbatch.sh baselines/2d_painting/config.yaml`
+- If your jar lives elsewhere: `MC_DIR=/path/to/mc-server MC_JAR=paper-1.19.2-307.jar ACCOUNT=YOUR_ACCOUNT PARTITION=YOUR_PARTITION ./baselines/2d_painting/run_sbatch.sh baselines/2d_painting/config.yaml`
 
 Where to look:
 
-- Slurm stdout: `baselines/slurm_logs/%x-%j.out`
+- Slurm stdout: `baselines/2d_painting/slurm_logs/%x-%j.out`
 - Minecraft server log: `${MC_DIR}/logs/server_${SLURM_JOB_ID}.log` (printed in Slurm stdout)
-- Eval output: `baselines/outputs/${SLURM_JOB_NAME}-${SLURM_JOB_ID}.{jsonl|json}` (printed in Slurm stdout)
+- Eval output: `baselines/2d_painting/outputs/${SLURM_JOB_NAME}-${SLURM_JOB_ID}.{jsonl|json}` (printed in Slurm stdout)
 
 This script copies your base config to `$SLURM_TMPDIR` and only overwrites:
 
 - `dataset.root` → absolute `${REPO_DIR}/dataset`
-- `output.path` → absolute `baselines/outputs/...`
+- `output.path` → absolute `baselines/2d_painting/outputs/...`
 - `output.overwrite` → `true`
 - `minecraft.enabled/host/port/username` → force-enable MC execution on localhost
 
-So you can still edit `generation.max_new_tokens`, sampling params, prompts, etc. in `baselines/config.yaml` normally.
+So you can still edit `generation.max_new_tokens`, sampling params, prompts, etc. in `baselines/2d_painting/config.yaml` normally.
 
 Output format:
 

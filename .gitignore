@@ -5,9 +5,8 @@ __pycache__/
 node_modules/
 
 # Baselines
-baselines/outputs/
-baselines/slurm_logs/
-baselines/run.sh
-baselines/run_sbatch.sh
-baselines/config.mc*.yaml
-baselines/baselines/
+baselines/**/outputs/
+baselines/**/slurm_logs/
+baselines/**/run.sh
+baselines/**/run_sbatch.sh
+baselines/**/config.mc*.yaml

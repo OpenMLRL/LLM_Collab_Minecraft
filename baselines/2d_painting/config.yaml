@@ -3,7 +3,7 @@ seed: 1234
 
 dataset:
   # Path is resolved relative to this config file.
-  root: ../dataset
+  root: ../../dataset
   include_glob: "**/*.json"
   exclude_glob:
     - "**/README.md"

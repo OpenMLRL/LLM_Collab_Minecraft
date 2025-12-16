@@ -2,14 +2,14 @@
 set -euo pipefail
 
 # Copy this file to `run.sh` and fill in your own Slurm/conda settings:
-#   cp baselines/run.example.sh baselines/run.sh
-#   vim baselines/run.sh
+#   cp baselines/2d_painting/run.example.sh baselines/2d_painting/run.sh
+#   vim baselines/2d_painting/run.sh
 #
 # Then submit:
-#   bash baselines/run.sh baselines/config.yaml
+#   bash baselines/2d_painting/run.sh baselines/2d_painting/config.yaml
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+REPO_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 CONFIG_PATH="${1:-${SCRIPT_DIR}/config.yaml}"
 
@@ -35,7 +35,7 @@ mkdir -p "${SLURM_LOG_DIR}"
 if [[ -z "${ACCOUNT}" || -z "${PARTITION}" ]]; then
   echo "ERROR: set ACCOUNT and PARTITION (env vars) for sbatch." >&2
   echo "Example:" >&2
-  echo "  ACCOUNT=YOUR_ACCOUNT PARTITION=YOUR_PARTITION bash baselines/run.sh baselines/config.yaml" >&2
+  echo "  ACCOUNT=YOUR_ACCOUNT PARTITION=YOUR_PARTITION bash baselines/2d_painting/run.sh baselines/2d_painting/config.yaml" >&2
   exit 2
 fi
 
@@ -46,7 +46,7 @@ if [ -f \"${BASHRC_PATH}\" ]; then source \"${BASHRC_PATH}\"; fi; \
 if ! command -v conda >/dev/null 2>&1; then echo \"ERROR: conda not found (set BASHRC_PATH or load conda module)\" >&2; exit 1; fi; \
 conda activate \"${CONDA_ENV}\"; \
 cd \"${REPO_DIR}\"; \
-python3 -u baselines/main.py --config \"${CONFIG_PATH}\" ${EXTRA_ARGS}'"
+python3 -u baselines/2d_painting/main.py --config \"${CONFIG_PATH}\" ${EXTRA_ARGS}'"
 
 echo "Submitting Slurm job:"
 echo "  config: ${CONFIG_PATH}"
@@ -65,4 +65,3 @@ sbatch \
   --job-name="${JOB_NAME}" \
   --output="${SLURM_LOG_DIR}/%x-%j.out" \
   --wrap="${WRAP_CMD}"
-

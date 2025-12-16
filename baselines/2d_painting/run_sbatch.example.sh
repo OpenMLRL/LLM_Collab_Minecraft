@@ -2,15 +2,15 @@
 set -euo pipefail
 
 # Copy this file to `run_sbatch.sh` and fill in your own Slurm settings:
-#   cp baselines/run_sbatch.example.sh baselines/run_sbatch.sh
-#   chmod +x baselines/run_sbatch.sh
-#   vim baselines/run_sbatch.sh
+#   cp baselines/2d_painting/run_sbatch.example.sh baselines/2d_painting/run_sbatch.sh
+#   chmod +x baselines/2d_painting/run_sbatch.sh
+#   vim baselines/2d_painting/run_sbatch.sh
 #
 # Then submit:
-#   ./baselines/run_sbatch.sh baselines/config.yaml
+#   ./baselines/2d_painting/run_sbatch.sh baselines/2d_painting/config.yaml
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+REPO_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 BASE_CONFIG_PATH="${1:-${SCRIPT_DIR}/config.yaml}"
 if command -v realpath >/dev/null 2>&1; then
@@ -51,7 +51,7 @@ OUTPUT_FORMAT="${OUTPUT_FORMAT:-auto}" # auto | jsonl | json
 if [[ -z "${ACCOUNT}" || -z "${PARTITION}" || "${ACCOUNT}" == "..." || "${PARTITION}" == "..." || "${ACCOUNT}" == "YOUR_ACCOUNT" || "${PARTITION}" == "YOUR_PARTITION" ]]; then
   echo "ERROR: set ACCOUNT and PARTITION (env vars) for sbatch." >&2
   echo "Example:" >&2
-  echo "  ACCOUNT=YOUR_ACCOUNT PARTITION=YOUR_PARTITION ./baselines/run_sbatch.sh baselines/config.yaml" >&2
+  echo "  ACCOUNT=YOUR_ACCOUNT PARTITION=YOUR_PARTITION ./baselines/2d_painting/run_sbatch.sh baselines/2d_painting/config.yaml" >&2
   exit 2
 fi
 
@@ -261,7 +261,7 @@ except Exception:
 PY
 )"
 
-OUT_PATH="${REPO_DIR}/baselines/outputs/${SLURM_JOB_NAME:-llm_collab_mc_mc}-${SLURM_JOB_ID:-$$}.${OUT_EXT}"
+OUT_PATH="${REPO_DIR}/baselines/2d_painting/outputs/${SLURM_JOB_NAME:-llm_collab_mc_mc}-${SLURM_JOB_ID:-$$}.${OUT_EXT}"
 
 mkdir -p "$(dirname "${OUT_PATH}")"
 
@@ -275,7 +275,7 @@ sed -i -E "s/^  port: .*/  port: ${MC_PORT}/" "${CFG}"
 sed -i -E "s/^  username: .*/  username: ${BOT_USERNAME}/" "${CFG}"
 
 cd "${REPO_DIR}"
-python3 -u baselines/main.py --config "${CFG}" ${EXTRA_ARGS}
+python3 -u baselines/2d_painting/main.py --config "${CFG}" ${EXTRA_ARGS}
 
 echo "baseline_output=${OUT_PATH}"
 tail -n 1 "${OUT_PATH}" | head -c 500 || true

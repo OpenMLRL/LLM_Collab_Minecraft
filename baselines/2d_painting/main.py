@@ -952,7 +952,7 @@ def main() -> int:
             if not (isinstance(spawn, list) and len(spawn) == 3):
                 raise RuntimeError(
                     "minecraft.origin_mode=spawn_offset requires mc_executor to return spawn_floored=[x,y,z]. "
-                    "Update baselines/mc_executor.cjs accordingly."
+                    "Update baselines/2d_painting/mc_executor.cjs accordingly."
                 )
             world_origin = [
                 int(spawn[0]) + mc_spawn_offset_vec[0],

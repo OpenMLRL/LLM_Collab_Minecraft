@@ -40,8 +40,8 @@ Important: `op executor_bot` is a Minecraft server/admin command (not a bash com
 
 ## Baselines (one-shot commands + optional MC eval)
 
-- Edit config: `baselines/config.yaml`
+- Edit config: `baselines/2d_painting/config.yaml`
 - If `minecraft.enabled=true`, keep a Minecraft server running and OP the bot username (see smoke test steps above).
-- Run locally (writes `.jsonl` by default): `python3 baselines/main.py --config baselines/config.yaml`
-- Slurm: copy `baselines/run.example.sh` to `baselines/run.sh` (ignored by git), then `bash baselines/run.sh baselines/config.yaml`
-- If you need `minecraft.enabled=true` on Slurm: use `baselines/run_sbatch.example.sh` (see `baselines/README.md`)
+- Run locally (writes `.jsonl` by default): `python3 baselines/2d_painting/main.py --config baselines/2d_painting/config.yaml`
+- Slurm: copy `baselines/2d_painting/run.example.sh` to `baselines/2d_painting/run.sh` (ignored by git), then `bash baselines/2d_painting/run.sh baselines/2d_painting/config.yaml`
+- If you need `minecraft.enabled=true` on Slurm: use `baselines/2d_painting/run_sbatch.example.sh` (see `baselines/2d_painting/README.md`)
