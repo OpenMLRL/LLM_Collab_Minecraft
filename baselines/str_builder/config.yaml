@@ -1,6 +1,11 @@
 run_name: qwen3_4b_str_builder
 seed: 1234
 
+agents:
+  # 1 = single agent (current behavior)
+  # 2 = two agents with separate block constraints
+  num_agents: 2
+
 dataset:
   # Path is resolved relative to this config file.
   csv_path: ../../dataset/str_builder/data.csv
@@ -12,6 +17,8 @@ task:
   # Two block types the agent may use.
   block_even: white_concrete
   block_odd: black_concrete
+  # Agent2 block (num_agents=2).
+  block_agent2: red_concrete
   # S_shape = exp(-CD / sigma)
   chamfer_sigma: 2.0
 
@@ -90,4 +97,62 @@ prompt:
     - Use absolute integer coordinates only (no ~).
     - Build ONLY the letters. Do NOT build a background/canvas.
     - Adjacent constraint: any two 4-neighbor adjacent blocks you place must have different block types.
+    - Every coordinate must be within the bbox.
+
+  # Optional overrides used when agents.num_agents=2.
+  user_template_agent1: |
+    You are Agent 1 in a 2-person Minecraft building team. You will place SOME of the blocks for the final build.
+
+    Task: Build the uppercase string as 5x7 block letters on a 2D plane (z is constant).
+    String: {text}
+    Difficulty: {difficulty}
+
+    WORLD bbox (inclusive):
+    - from: {world_bbox_from}
+    - to:   {world_bbox_to}
+
+    Coordinate mapping (absolute coords):
+    - Let (min_x, min_y, min_z) be bbox.from and (max_x, max_y, max_z) be bbox.to.
+    - x increases from min_x to max_x (left to right).
+    - y increases from min_y to max_y (bottom to top).
+    - z is constant (min_z == max_z).
+
+    Available blocks (use ONLY these two):
+    - {block_even}
+    - {block_odd}
+
+    Constraints:
+    - Output ONLY Minecraft commands, one per line.
+    - Allowed commands: /setblock, /fill
+    - Use absolute integer coordinates only (no ~).
+    - Build ONLY the letters. Do NOT build a background/canvas.
+    - Team constraint: in the final build, any two 4-neighbor adjacent blocks must have different block types.
+    - Every coordinate must be within the bbox.
+
+  user_template_agent2: |
+    You are Agent 2 in a 2-person Minecraft building team. You will place SOME of the blocks for the final build.
+
+    Task: Build the uppercase string as 5x7 block letters on a 2D plane (z is constant).
+    String: {text}
+    Difficulty: {difficulty}
+
+    WORLD bbox (inclusive):
+    - from: {world_bbox_from}
+    - to:   {world_bbox_to}
+
+    Coordinate mapping (absolute coords):
+    - Let (min_x, min_y, min_z) be bbox.from and (max_x, max_y, max_z) be bbox.to.
+    - x increases from min_x to max_x (left to right).
+    - y increases from min_y to max_y (bottom to top).
+    - z is constant (min_z == max_z).
+
+    Available blocks (use ONLY this block):
+    - {block_agent2}
+
+    Constraints:
+    - Output ONLY Minecraft commands, one per line.
+    - Allowed commands: /setblock, /fill
+    - Use absolute integer coordinates only (no ~).
+    - Build ONLY the letters. Do NOT build a background/canvas.
+    - Team constraint: in the final build, any two 4-neighbor adjacent blocks must have different block types.
     - Every coordinate must be within the bbox.

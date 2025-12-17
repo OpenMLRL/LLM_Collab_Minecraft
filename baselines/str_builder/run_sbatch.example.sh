@@ -41,6 +41,7 @@ MC_DIR="${MC_DIR:-$HOME/mc-server}"
 MC_JAR="${MC_JAR:-paper-1.19.2-307.jar}"
 MC_PORT="${MC_PORT:-25565}"
 BOT_USERNAME="${BOT_USERNAME:-executor_bot}"
+BOT_USERNAME2="${BOT_USERNAME2:-${BOT_USERNAME}_2}"
 MC_XMS="${MC_XMS:-1G}"
 MC_XMX="${MC_XMX:-1G}"
 
@@ -72,7 +73,7 @@ sbatch \
   --time="${TIME}" \
   --job-name="${JOB_NAME}" \
   --output="${SLURM_LOG_DIR}/%x-%j.out" \
-  --export=ALL,REPO_DIR="${REPO_DIR}",BASE_CONFIG_PATH="${BASE_CONFIG_PATH}",CONDA_ENV="${CONDA_ENV}",BASHRC_PATH="${BASHRC_PATH}",MC_DIR="${MC_DIR}",MC_JAR="${MC_JAR}",MC_PORT="${MC_PORT}",BOT_USERNAME="${BOT_USERNAME}",MC_XMS="${MC_XMS}",MC_XMX="${MC_XMX}",EXTRA_ARGS="${EXTRA_ARGS}",OUTPUT_FORMAT="${OUTPUT_FORMAT}" \
+  --export=ALL,REPO_DIR="${REPO_DIR}",BASE_CONFIG_PATH="${BASE_CONFIG_PATH}",CONDA_ENV="${CONDA_ENV}",BASHRC_PATH="${BASHRC_PATH}",MC_DIR="${MC_DIR}",MC_JAR="${MC_JAR}",MC_PORT="${MC_PORT}",BOT_USERNAME="${BOT_USERNAME}",BOT_USERNAME2="${BOT_USERNAME2}",MC_XMS="${MC_XMS}",MC_XMX="${MC_XMX}",EXTRA_ARGS="${EXTRA_ARGS}",OUTPUT_FORMAT="${OUTPUT_FORMAT}" \
   <<'SBATCH'
 #!/usr/bin/env bash
 set -eo pipefail
@@ -138,10 +139,10 @@ else
   sed -i -E "s/^online-mode=.*/online-mode=false/" "${MC_DIR}/server.properties" || true
 fi
 
-OPS_JSON="${MC_DIR}/ops.json" MC_USERNAME="${BOT_USERNAME}" python3 - <<'PY'
+OPS_JSON="${MC_DIR}/ops.json" MC_USERNAMES="${BOT_USERNAME},${BOT_USERNAME2}" python3 - <<'PY'
 import os, json, hashlib, uuid
 ops_path = os.environ["OPS_JSON"]
-username = os.environ["MC_USERNAME"]
+usernames = [u.strip() for u in os.environ.get("MC_USERNAMES","").split(",") if u.strip()]
 
 data = []
 if os.path.exists(ops_path):
@@ -152,24 +153,27 @@ if os.path.exists(ops_path):
 if not isinstance(data, list):
     data = []
 
-s = ("OfflinePlayer:" + username).encode("utf-8")
-d = bytearray(hashlib.md5(s).digest())
-d[6] = (d[6] & 0x0F) | 0x30
-d[8] = (d[8] & 0x3F) | 0x80
-uid = str(uuid.UUID(bytes=bytes(d)))
+def offline_uuid(name: str) -> str:
+    s = ("OfflinePlayer:" + name).encode("utf-8")
+    d = bytearray(hashlib.md5(s).digest())
+    d[6] = (d[6] & 0x0F) | 0x30
+    d[8] = (d[8] & 0x3F) | 0x80
+    return str(uuid.UUID(bytes=bytes(d)))
 
-found = False
-for e in data:
-    if isinstance(e, dict) and e.get("name") == username:
-        e["uuid"] = uid
-        e["level"] = 4
-        e.setdefault("bypassesPlayerLimit", False)
-        found = True
-if not found:
-    data.append({"uuid": uid, "name": username, "level": 4, "bypassesPlayerLimit": False})
+for username in usernames:
+    uid = offline_uuid(username)
+    found = False
+    for e in data:
+        if isinstance(e, dict) and e.get("name") == username:
+            e["uuid"] = uid
+            e["level"] = 4
+            e.setdefault("bypassesPlayerLimit", False)
+            found = True
+    if not found:
+        data.append({"uuid": uid, "name": username, "level": 4, "bypassesPlayerLimit": False})
+    print("ops.json updated:", username, uid)
 
 json.dump(data, open(ops_path, "w", encoding="utf-8"), indent=2)
-print("ops.json updated:", username, uid)
 PY
 
 SERVER_LOG="${MC_DIR}/logs/server_${SLURM_JOB_ID:-$$}.log"
@@ -230,6 +234,7 @@ cfg["minecraft"]["enabled"] = True
 cfg["minecraft"]["host"] = "127.0.0.1"
 cfg["minecraft"]["port"] = int(os.environ.get("MC_PORT","25565"))
 cfg["minecraft"]["username"] = os.environ.get("BOT_USERNAME","executor_bot")
+cfg["minecraft"]["username2"] = os.environ.get("BOT_USERNAME2", cfg["minecraft"]["username"] + "_2")
 cfg["minecraft"]["origin_mode"] = "spawn_offset"
 
 cfg_path.write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")

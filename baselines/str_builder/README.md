@@ -37,6 +37,14 @@ This baseline writes **two** JSONL files per run:
 
 The simplified JSONL keeps only: `task_id/string/difficulty`, `model_id`, and the 3 scores (`score_shape_overlap`, `score_components`, `score_material_adjacent`).
 
+## Multi-agent (num_agents=2)
+
+Set `agents.num_agents: 2` in `baselines/str_builder/config.yaml` to run two agents per task:
+
+- Agent1 can only use `task.block_even/task.block_odd` (default: white/black).
+- Agent2 can only use `task.block_agent2` (default: red).
+- Their validated commands are merged and executed in the same world, then scored with the same metrics.
+
 ## Metrics (offline + optional MC scan)
 
 Each record writes:

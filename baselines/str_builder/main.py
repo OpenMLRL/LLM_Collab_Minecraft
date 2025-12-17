@@ -286,6 +286,97 @@ def _run_mc_executor(
     )
 
 
+def _run_mc_executor_multi(
+    *,
+    node_script: Path,
+    host: str,
+    port: int,
+    username1: str,
+    username2: str,
+    version: str | None,
+    step_delay_ms: int,
+    scan_delay_ms: int,
+    timeout_ms: int,
+    pre_commands_1: list[str],
+    commands_1: list[str],
+    post_commands_1: list[str],
+    pre_commands_2: list[str],
+    commands_2: list[str],
+    post_commands_2: list[str],
+    scan_from: list[int] | None,
+    scan_to: list[int] | None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "bots": [
+            {
+                "username": username1,
+                "pre_commands": pre_commands_1,
+                "commands": commands_1,
+                "post_commands": post_commands_1,
+            },
+            {
+                "username": username2,
+                "pre_commands": pre_commands_2,
+                "commands": commands_2,
+                "post_commands": post_commands_2,
+            },
+        ]
+    }
+    if scan_from is not None and scan_to is not None:
+        payload["scan"] = {"from": scan_from, "to": scan_to}
+
+    cmd = [
+        "node",
+        str(node_script),
+        "--host",
+        host,
+        "--port",
+        str(port),
+        "--username",
+        username1,
+        "--username2",
+        username2,
+        "--step-delay-ms",
+        str(step_delay_ms),
+        "--scan-delay-ms",
+        str(scan_delay_ms),
+        "--timeout-ms",
+        str(timeout_ms),
+    ]
+    if version:
+        cmd.extend(["--version", version])
+
+    proc = subprocess.run(
+        cmd,
+        input=json.dumps(payload, ensure_ascii=False),
+        text=True,
+        capture_output=True,
+    )
+    stdout = proc.stdout or ""
+    if proc.returncode != 0 and not stdout.strip():
+        raise RuntimeError(f"mc_executor failed: returncode={proc.returncode} stderr={proc.stderr}")
+
+    for line in stdout.splitlines()[::-1]:
+        s = line.strip()
+        if not s:
+            continue
+        if not s.startswith("{"):
+            continue
+        try:
+            obj = json.loads(s)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict):
+            return obj
+
+    raise RuntimeError(
+        "mc_executor returned no JSON object on stdout.\n"
+        f"returncode={proc.returncode}\n"
+        f"stdout:\n{stdout}\n"
+        f"stderr:\n{proc.stderr}"
+    )
+
+
 def _compute_world_bbox(
     *,
     local_from: list[int],
@@ -832,6 +923,13 @@ def main() -> int:
     run_name = str(cfg.get("run_name") or "baseline")
     seed = int(cfg.get("seed") or 0)
 
+    agents_cfg = cfg.get("agents") or {}
+    if not isinstance(agents_cfg, dict):
+        raise ValueError("agents must be a mapping")
+    num_agents = int(agents_cfg.get("num_agents") or 1)
+    if num_agents not in (1, 2):
+        raise ValueError("agents.num_agents must be 1 or 2")
+
     task_cfg = cfg.get("task") or {}
     if not isinstance(task_cfg, dict):
         raise ValueError("task must be a mapping")
@@ -839,6 +937,7 @@ def main() -> int:
     local_z = int(task_cfg.get("local_z") or 0)
     block_even = str(task_cfg.get("block_even") or "white_concrete")
     block_odd = str(task_cfg.get("block_odd") or "black_concrete")
+    block_agent2 = str(task_cfg.get("block_agent2") or "red_concrete")
     chamfer_sigma = float(task_cfg.get("chamfer_sigma") or 2.0)
 
     dataset_cfg = cfg.get("dataset") or {}
@@ -882,6 +981,8 @@ def main() -> int:
         raise ValueError("prompt must be a mapping")
     system_prompt = str(prompt_cfg.get("system") or "").rstrip()
     user_template = str(prompt_cfg.get("user_template") or "{task_json}").rstrip()
+    user_template_agent1 = str(prompt_cfg.get("user_template_agent1") or user_template).rstrip()
+    user_template_agent2 = str(prompt_cfg.get("user_template_agent2") or user_template).rstrip()
 
     generation_cfg = cfg.get("generation") or {}
     if not isinstance(generation_cfg, dict):
@@ -891,7 +992,32 @@ def main() -> int:
     if args.dry_run:
         _eprint(f"[dry-run] tasks={len(tasks)} csv_path={csv_path}")
         for task in tasks[:3]:
-            user_prompt = user_template.format(
+            if num_agents == 1:
+                user_prompt = user_template.format(
+                    task_json=json.dumps(
+                        {
+                            "task_id": task.task_id,
+                            "string": task.text,
+                            "difficulty": task.difficulty,
+                            "bbox": {"from": task.local_bbox_from, "to": task.local_bbox_to},
+                        },
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    ),
+                    task_id=task.task_id,
+                    text=task.text,
+                    difficulty=task.difficulty,
+                    target_rows="\n".join(task.target_rows_topdown),
+                    block_even=block_even,
+                    block_odd=block_odd,
+                    block_agent2=block_agent2,
+                    world_bbox_from=json.dumps(task.local_bbox_from, separators=(",", ":")),
+                    world_bbox_to=json.dumps(task.local_bbox_to, separators=(",", ":")),
+                )
+                _eprint(f"\n=== {task.task_id} string={task.text!r} difficulty={task.difficulty} ===\n{user_prompt}\n")
+                continue
+
+            user_prompt_1 = user_template_agent1.format(
                 task_json=json.dumps(
                     {
                         "task_id": task.task_id,
@@ -908,10 +1034,35 @@ def main() -> int:
                 target_rows="\n".join(task.target_rows_topdown),
                 block_even=block_even,
                 block_odd=block_odd,
+                block_agent2=block_agent2,
                 world_bbox_from=json.dumps(task.local_bbox_from, separators=(",", ":")),
                 world_bbox_to=json.dumps(task.local_bbox_to, separators=(",", ":")),
             )
-            _eprint(f"\n=== {task.task_id} string={task.text!r} difficulty={task.difficulty} ===\n{user_prompt}\n")
+            user_prompt_2 = user_template_agent2.format(
+                task_json=json.dumps(
+                    {
+                        "task_id": task.task_id,
+                        "string": task.text,
+                        "difficulty": task.difficulty,
+                        "bbox": {"from": task.local_bbox_from, "to": task.local_bbox_to},
+                    },
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ),
+                task_id=task.task_id,
+                text=task.text,
+                difficulty=task.difficulty,
+                target_rows="\n".join(task.target_rows_topdown),
+                block_even=block_even,
+                block_odd=block_odd,
+                block_agent2=block_agent2,
+                world_bbox_from=json.dumps(task.local_bbox_from, separators=(",", ":")),
+                world_bbox_to=json.dumps(task.local_bbox_to, separators=(",", ":")),
+            )
+            _eprint(
+                f"\n=== {task.task_id} string={task.text!r} difficulty={task.difficulty} ===\n"
+                f"[agent1]\n{user_prompt_1}\n\n[agent2]\n{user_prompt_2}\n"
+            )
         return 0
 
     model_cfg = cfg.get("model") or {}
@@ -950,6 +1101,7 @@ def main() -> int:
     _eprint(f"Tasks: {len(tasks)}")
     _eprint(f"Output: {output_path}")
     _eprint(f"Output(simple): {output_simple_path}")
+    _eprint(f"Agents: num_agents={num_agents}")
 
     mc_cfg = cfg.get("minecraft") or {}
     if not isinstance(mc_cfg, dict):
@@ -959,6 +1111,9 @@ def main() -> int:
     mc_host = str(mc_cfg.get("host") or "127.0.0.1")
     mc_port = int(mc_cfg.get("port") or 25565)
     mc_username = str(mc_cfg.get("username") or "executor_bot")
+    mc_username2 = str(mc_cfg.get("username2") or f"{mc_username}_2")
+    if num_agents == 2 and mc_username2 == mc_username:
+        raise ValueError("minecraft.username2 must be different from minecraft.username when agents.num_agents=2")
     mc_version = mc_cfg.get("version")
     mc_version = str(mc_version) if mc_version not in (None, "null") else None
     mc_origin_mode = str(mc_cfg.get("origin_mode") or "fixed").strip().lower()
@@ -1025,7 +1180,13 @@ def main() -> int:
         else:
             raise ValueError("minecraft.origin_mode must be one of: fixed, spawn_offset")
 
-        _eprint(f"Minecraft enabled: host={mc_host} port={mc_port} username={mc_username} origin={world_origin}")
+        if num_agents == 1:
+            _eprint(f"Minecraft enabled: host={mc_host} port={mc_port} username={mc_username} origin={world_origin}")
+        else:
+            _eprint(
+                f"Minecraft enabled: host={mc_host} port={mc_port} username1={mc_username} username2={mc_username2} "
+                f"origin={world_origin}"
+            )
 
     def _open_output_writer(path: Path):
         if path.suffix.lower() == ".jsonl":
@@ -1080,7 +1241,8 @@ def main() -> int:
             return float(v)
         return None
 
-    allowed_blocks = [block_even, block_odd]
+    allowed_blocks_agent1 = [block_even, block_odd]
+    allowed_blocks_agent2 = [block_agent2]
     write_record, close_writer = _open_output_writer(output_path)
     write_simple_record, close_simple_writer = _open_jsonl_writer(output_simple_path)
     try:
@@ -1092,190 +1254,483 @@ def main() -> int:
             if world_origin is not None:
                 w_from, w_to = _compute_world_bbox(local_from=local_from, local_to=local_to, world_origin=world_origin)
 
-            user_prompt = user_template.format(
-                task_json=json.dumps(
-                    {
-                        "task_id": task.task_id,
-                        "string": task.text,
-                        "difficulty": task.difficulty,
-                        "bbox": {"from": local_from, "to": local_to},
-                    },
-                    ensure_ascii=False,
-                    separators=(",", ":"),
-                ),
-                task_id=task.task_id,
-                text=task.text,
-                difficulty=task.difficulty,
-                target_rows="\n".join(task.target_rows_topdown),
-                block_even=block_even,
-                block_odd=block_odd,
-                world_bbox_from=json.dumps(w_from, separators=(",", ":")),
-                world_bbox_to=json.dumps(w_to, separators=(",", ":")),
-            )
+            max_commands_per_agent = mc_max_commands if num_agents == 1 else max(1, mc_max_commands // num_agents)
+            max_commands_agent1 = max_commands_per_agent + (mc_max_commands % num_agents)
+            max_commands_agent2 = max_commands_per_agent
 
-            prompt_text, chat_messages = _render_prompt(
-                tokenizer=loaded.tokenizer,
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                use_chat_template=use_chat_template,
-            )
-
-            if args.verbose:
-                _eprint(f"[{idx}/{len(tasks)}] {task.task_id} generating...")
-            t0 = time.time()
-            if args.stream_llm_output and int(generation_cfg.get("num_return_sequences") or 1) != 1:
-                _eprint("--stream-llm-output only supports num_return_sequences=1; disabling streaming.")
-                stream_output = False
-            else:
-                stream_output = bool(args.stream_llm_output)
-            if stream_output:
-                _eprint(f"--- streaming LLM output task_id={task.task_id} ---")
-            outputs = _generate_with_transformers(loaded, prompt_text, generation_cfg, stream_output=stream_output)
-            dt = time.time() - t0
-            if args.verbose:
-                _eprint(f"[{idx}/{len(tasks)}] {task.task_id} generated samples={len(outputs)} dt={dt:.2f}s")
-
-            for sample_id, output_text in enumerate(outputs):
-                if args.print_llm_output:
-                    max_chars = int(args.print_llm_output_max_chars or 0)
-                    out = output_text if max_chars <= 0 else output_text[:max_chars]
-                    suffix = "" if max_chars <= 0 or len(output_text) <= max_chars else "\n... [truncated]"
-                    _eprint(f"\n=== LLM output task_id={task.task_id} sample_id={sample_id} ===\n{out}{suffix}\n")
-
-                lines = _extract_command_lines(output_text)
-                accepted_cmds, rejected_cmds = _validate_and_normalize_mc_commands(
-                    lines=lines,
-                    allowed_blocks=allowed_blocks,
-                    world_bbox_from=w_from,
-                    world_bbox_to=w_to,
-                    max_commands=mc_max_commands,
+            if num_agents == 1:
+                user_prompt = user_template.format(
+                    task_json=json.dumps(
+                        {
+                            "task_id": task.task_id,
+                            "string": task.text,
+                            "difficulty": task.difficulty,
+                            "bbox": {"from": local_from, "to": local_to},
+                        },
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    ),
+                    task_id=task.task_id,
+                    text=task.text,
+                    difficulty=task.difficulty,
+                    target_rows="\n".join(task.target_rows_topdown),
+                    block_even=block_even,
+                    block_odd=block_odd,
+                    block_agent2=block_agent2,
+                    world_bbox_from=json.dumps(w_from, separators=(",", ":")),
+                    world_bbox_to=json.dumps(w_to, separators=(",", ":")),
                 )
 
-                if args.print_commands:
-                    _eprint(
-                        f"[{task.task_id} sample={sample_id}] accepted={len(accepted_cmds)} rejected={len(rejected_cmds)}"
-                    )
-                    if accepted_cmds:
-                        _eprint("\n".join(accepted_cmds[:50]) + ("\n... [truncated]" if len(accepted_cmds) > 50 else ""))
+                prompt_text, chat_messages = _render_prompt(
+                    tokenizer=loaded.tokenizer,
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    use_chat_template=use_chat_template,
+                )
 
-                mc_result: dict[str, Any] | None = None
-                metrics: dict[str, Any] = {"latency_s": dt}
+                if args.verbose:
+                    _eprint(f"[{idx}/{len(tasks)}] {task.task_id} generating...")
+                t0 = time.time()
+                if args.stream_llm_output and int(generation_cfg.get("num_return_sequences") or 1) != 1:
+                    _eprint("--stream-llm-output only supports num_return_sequences=1; disabling streaming.")
+                    stream_output = False
+                else:
+                    stream_output = bool(args.stream_llm_output)
+                if stream_output:
+                    _eprint(f"--- streaming LLM output task_id={task.task_id} ---")
+                outputs = _generate_with_transformers(loaded, prompt_text, generation_cfg, stream_output=stream_output)
+                dt = time.time() - t0
+                if args.verbose:
+                    _eprint(f"[{idx}/{len(tasks)}] {task.task_id} generated samples={len(outputs)} dt={dt:.2f}s")
 
-                score_origin = world_origin if world_origin is not None else [0, 0, 0]
-                try:
-                    sim_blocks = _simulate_commands_to_scan_blocks(
-                        commands=accepted_cmds,
+                for sample_id, output_text in enumerate(outputs):
+                    if args.print_llm_output:
+                        max_chars = int(args.print_llm_output_max_chars or 0)
+                        out = output_text if max_chars <= 0 else output_text[:max_chars]
+                        suffix = "" if max_chars <= 0 or len(output_text) <= max_chars else "\n... [truncated]"
+                        _eprint(f"\n=== LLM output task_id={task.task_id} sample_id={sample_id} ===\n{out}{suffix}\n")
+
+                    lines = _extract_command_lines(output_text)
+                    accepted_cmds, rejected_cmds = _validate_and_normalize_mc_commands(
+                        lines=lines,
+                        allowed_blocks=allowed_blocks_agent1,
                         world_bbox_from=w_from,
                         world_bbox_to=w_to,
+                        max_commands=max_commands_agent1,
                     )
-                    metrics.update(
-                        _score_str_builder(
-                            task=task,
-                            world_origin=score_origin,
-                            world_scan_blocks=sim_blocks,
-                            chamfer_sigma=chamfer_sigma,
+
+                    if args.print_commands:
+                        _eprint(
+                            f"[{task.task_id} sample={sample_id}] accepted={len(accepted_cmds)} rejected={len(rejected_cmds)}"
                         )
-                    )
-                except Exception as e:
-                    metrics.update({"score_mean": 0.0, "sim_error": str(e)})
+                        if accepted_cmds:
+                            _eprint(
+                                "\n".join(accepted_cmds[:50])
+                                + ("\n... [truncated]" if len(accepted_cmds) > 50 else "")
+                            )
 
-                if mc_enabled and world_origin is not None:
-                    min_x = min(w_from[0], w_to[0])
-                    max_x = max(w_from[0], w_to[0])
-                    min_y = min(w_from[1], w_to[1])
-                    max_y = max(w_from[1], w_to[1])
-                    min_z = min(w_from[2], w_to[2])
-                    max_z = max(w_from[2], w_to[2])
-                    tp_x = (min_x + max_x) // 2
-                    tp_y = min_y
-                    tp_z = max_z + 2
+                    mc_result: dict[str, Any] | None = None
+                    metrics: dict[str, Any] = {"latency_s": dt}
 
-                    pre_cmds: list[str] = []
-                    if mc_teleport_before_each:
-                        pre_cmds.append(f"/tp {mc_username} {tp_x} {tp_y} {tp_z}")
-                    if mc_reset_before_each:
-                        pre_cmds.append(f"/fill {min_x} {min_y} {min_z} {max_x} {max_y} {max_z} air")
-
+                    score_origin = world_origin if world_origin is not None else [0, 0, 0]
                     try:
-                        mc_result = _run_mc_executor(
-                            node_script=node_script,
-                            host=mc_host,
-                            port=mc_port,
-                            username=mc_username,
-                            version=mc_version,
-                            step_delay_ms=mc_step_delay_ms,
-                            scan_delay_ms=mc_scan_delay_ms,
-                            timeout_ms=mc_timeout_ms,
-                            pre_commands=pre_cmds,
+                        sim_blocks = _simulate_commands_to_scan_blocks(
                             commands=accepted_cmds,
-                            post_commands=[],
-                            scan_from=[min_x, min_y, min_z],
-                            scan_to=[max_x, max_y, max_z],
+                            world_bbox_from=w_from,
+                            world_bbox_to=w_to,
                         )
-                        scan = (mc_result.get("scan") or {}) if isinstance(mc_result, dict) else {}
-                        scan_blocks = scan.get("blocks") if isinstance(scan, dict) else None
-                        if isinstance(scan_blocks, list):
-                            mc_metrics = _score_str_builder(
+                        metrics.update(
+                            _score_str_builder(
                                 task=task,
-                                world_origin=world_origin,
-                                world_scan_blocks=scan_blocks,
+                                world_origin=score_origin,
+                                world_scan_blocks=sim_blocks,
                                 chamfer_sigma=chamfer_sigma,
                             )
-                            metrics.update({f"mc_{k}": v for k, v in mc_metrics.items()})
-                        else:
-                            metrics.update({"mc_error": "missing scan blocks"})
+                        )
                     except Exception as e:
-                        metrics.update({"mc_error": str(e)})
+                        metrics.update({"score_mean": 0.0, "sim_error": str(e)})
 
-                record: dict[str, Any] = {
-                    "run_name": run_name,
-                    "task_id": task.task_id,
-                    "dataset_path": str(csv_path),
-                    "dataset_row": task.csv_row_index,
-                    "sample_id": sample_id,
-                    "model": {
-                        "backend": backend,
-                        "model_id": loaded.model_id,
-                    },
-                    "generation": generation_cfg,
-                    "metrics": metrics,
-                    "output_text": output_text,
-                    "commands": accepted_cmds,
-                    "rejected_commands": rejected_cmds,
-                    "mc_result": mc_result,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                }
-                if write_task:
-                    record["task"] = {
-                        "task_id": task.task_id,
-                        "string": task.text,
-                        "difficulty": task.difficulty,
-                        "bbox": {"from": task.local_bbox_from, "to": task.local_bbox_to},
-                        "target_rows_topdown": task.target_rows_topdown,
-                        "allowed_blocks": allowed_blocks,
-                    }
-                if write_prompt:
-                    record["prompt"] = {
-                        "system": system_prompt,
-                        "user": user_prompt,
-                        "rendered": prompt_text,
-                        "chat_messages": chat_messages,
-                    }
+                    if mc_enabled and world_origin is not None:
+                        min_x = min(w_from[0], w_to[0])
+                        max_x = max(w_from[0], w_to[0])
+                        min_y = min(w_from[1], w_to[1])
+                        max_y = max(w_from[1], w_to[1])
+                        min_z = min(w_from[2], w_to[2])
+                        max_z = max(w_from[2], w_to[2])
+                        tp_x = (min_x + max_x) // 2
+                        tp_y = min_y
+                        tp_z = max_z + 2
 
-                write_record(record)
-                write_simple_record(
-                    {
+                        pre_cmds: list[str] = []
+                        if mc_teleport_before_each:
+                            pre_cmds.append(f"/tp {mc_username} {tp_x} {tp_y} {tp_z}")
+                        if mc_reset_before_each:
+                            pre_cmds.append(f"/fill {min_x} {min_y} {min_z} {max_x} {max_y} {max_z} air")
+
+                        try:
+                            mc_result = _run_mc_executor(
+                                node_script=node_script,
+                                host=mc_host,
+                                port=mc_port,
+                                username=mc_username,
+                                version=mc_version,
+                                step_delay_ms=mc_step_delay_ms,
+                                scan_delay_ms=mc_scan_delay_ms,
+                                timeout_ms=mc_timeout_ms,
+                                pre_commands=pre_cmds,
+                                commands=accepted_cmds,
+                                post_commands=[],
+                                scan_from=[min_x, min_y, min_z],
+                                scan_to=[max_x, max_y, max_z],
+                            )
+                            scan = (mc_result.get("scan") or {}) if isinstance(mc_result, dict) else {}
+                            scan_blocks = scan.get("blocks") if isinstance(scan, dict) else None
+                            if isinstance(scan_blocks, list):
+                                mc_metrics = _score_str_builder(
+                                    task=task,
+                                    world_origin=world_origin,
+                                    world_scan_blocks=scan_blocks,
+                                    chamfer_sigma=chamfer_sigma,
+                                )
+                                metrics.update({f"mc_{k}": v for k, v in mc_metrics.items()})
+                            else:
+                                metrics.update({"mc_error": "missing scan blocks"})
+                        except Exception as e:
+                            metrics.update({"mc_error": str(e)})
+
+                    record: dict[str, Any] = {
+                        "run_name": run_name,
                         "task_id": task.task_id,
-                        "string": task.text,
-                        "difficulty": task.difficulty,
-                        "model_id": loaded.model_id,
-                        "score_shape_overlap": _pick_primary_metric(metrics, "score_shape_overlap"),
-                        "score_components": _pick_primary_metric(metrics, "score_components"),
-                        "score_material_adjacent": _pick_primary_metric(metrics, "score_material_adjacent"),
+                        "dataset_path": str(csv_path),
+                        "dataset_row": task.csv_row_index,
+                        "sample_id": sample_id,
+                        "num_agents": num_agents,
+                        "model": {
+                            "backend": backend,
+                            "model_id": loaded.model_id,
+                        },
+                        "generation": generation_cfg,
+                        "metrics": metrics,
+                        "output_text": output_text,
+                        "commands": accepted_cmds,
+                        "rejected_commands": rejected_cmds,
+                        "mc_result": mc_result,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
                     }
+                    if write_task:
+                        record["task"] = {
+                            "task_id": task.task_id,
+                            "string": task.text,
+                            "difficulty": task.difficulty,
+                            "bbox": {"from": task.local_bbox_from, "to": task.local_bbox_to},
+                            "target_rows_topdown": task.target_rows_topdown,
+                            "allowed_blocks": allowed_blocks_agent1,
+                        }
+                    if write_prompt:
+                        record["prompt"] = {
+                            "system": system_prompt,
+                            "user": user_prompt,
+                            "rendered": prompt_text,
+                            "chat_messages": chat_messages,
+                        }
+
+                    write_record(record)
+                    write_simple_record(
+                        {
+                            "task_id": task.task_id,
+                            "string": task.text,
+                            "difficulty": task.difficulty,
+                            "model_id": loaded.model_id,
+                            "score_shape_overlap": _pick_primary_metric(metrics, "score_shape_overlap"),
+                            "score_components": _pick_primary_metric(metrics, "score_components"),
+                            "score_material_adjacent": _pick_primary_metric(metrics, "score_material_adjacent"),
+                        }
+                    )
+                _eprint(f"[{idx}/{len(tasks)}] {task.task_id} samples={len(outputs)} {dt:.2f}s")
+            else:
+                user_prompt_1 = user_template_agent1.format(
+                    task_json=json.dumps(
+                        {
+                            "task_id": task.task_id,
+                            "string": task.text,
+                            "difficulty": task.difficulty,
+                            "bbox": {"from": local_from, "to": local_to},
+                        },
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    ),
+                    task_id=task.task_id,
+                    text=task.text,
+                    difficulty=task.difficulty,
+                    target_rows="\n".join(task.target_rows_topdown),
+                    block_even=block_even,
+                    block_odd=block_odd,
+                    block_agent2=block_agent2,
+                    world_bbox_from=json.dumps(w_from, separators=(",", ":")),
+                    world_bbox_to=json.dumps(w_to, separators=(",", ":")),
+                )
+                user_prompt_2 = user_template_agent2.format(
+                    task_json=json.dumps(
+                        {
+                            "task_id": task.task_id,
+                            "string": task.text,
+                            "difficulty": task.difficulty,
+                            "bbox": {"from": local_from, "to": local_to},
+                        },
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    ),
+                    task_id=task.task_id,
+                    text=task.text,
+                    difficulty=task.difficulty,
+                    target_rows="\n".join(task.target_rows_topdown),
+                    block_even=block_even,
+                    block_odd=block_odd,
+                    block_agent2=block_agent2,
+                    world_bbox_from=json.dumps(w_from, separators=(",", ":")),
+                    world_bbox_to=json.dumps(w_to, separators=(",", ":")),
                 )
 
-            _eprint(f"[{idx}/{len(tasks)}] {task.task_id} samples={len(outputs)} {dt:.2f}s")
+                prompt_text_1, chat_messages_1 = _render_prompt(
+                    tokenizer=loaded.tokenizer,
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt_1,
+                    use_chat_template=use_chat_template,
+                )
+                prompt_text_2, chat_messages_2 = _render_prompt(
+                    tokenizer=loaded.tokenizer,
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt_2,
+                    use_chat_template=use_chat_template,
+                )
+
+                if args.verbose:
+                    _eprint(f"[{idx}/{len(tasks)}] {task.task_id} generating agent1...")
+                t0 = time.time()
+                if args.stream_llm_output and int(generation_cfg.get("num_return_sequences") or 1) != 1:
+                    _eprint("--stream-llm-output only supports num_return_sequences=1; disabling streaming.")
+                    stream_output = False
+                else:
+                    stream_output = bool(args.stream_llm_output)
+                if stream_output:
+                    _eprint(f"--- streaming LLM output task_id={task.task_id} agent=1 ---")
+                outputs_1 = _generate_with_transformers(loaded, prompt_text_1, generation_cfg, stream_output=stream_output)
+                dt1 = time.time() - t0
+
+                if args.verbose:
+                    _eprint(f"[{idx}/{len(tasks)}] {task.task_id} generating agent2...")
+                t1 = time.time()
+                if stream_output:
+                    _eprint(f"--- streaming LLM output task_id={task.task_id} agent=2 ---")
+                outputs_2 = _generate_with_transformers(loaded, prompt_text_2, generation_cfg, stream_output=stream_output)
+                dt2 = time.time() - t1
+                dt = dt1 + dt2
+
+                n = min(len(outputs_1), len(outputs_2))
+                if args.verbose:
+                    _eprint(f"[{idx}/{len(tasks)}] {task.task_id} generated samples={n} dt={dt:.2f}s")
+
+                for sample_id in range(n):
+                    output_text_1 = outputs_1[sample_id]
+                    output_text_2 = outputs_2[sample_id]
+                    output_text = f"[agent1]\n{output_text_1}\n\n[agent2]\n{output_text_2}\n"
+
+                    if args.print_llm_output:
+                        max_chars = int(args.print_llm_output_max_chars or 0)
+                        out1 = output_text_1 if max_chars <= 0 else output_text_1[:max_chars]
+                        out2 = output_text_2 if max_chars <= 0 else output_text_2[:max_chars]
+                        suffix1 = "" if max_chars <= 0 or len(output_text_1) <= max_chars else "\n... [truncated]"
+                        suffix2 = "" if max_chars <= 0 or len(output_text_2) <= max_chars else "\n... [truncated]"
+                        _eprint(
+                            f"\n=== LLM output task_id={task.task_id} sample_id={sample_id} agent=1 ===\n{out1}{suffix1}\n"
+                        )
+                        _eprint(
+                            f"\n=== LLM output task_id={task.task_id} sample_id={sample_id} agent=2 ===\n{out2}{suffix2}\n"
+                        )
+
+                    lines_1 = _extract_command_lines(output_text_1)
+                    lines_2 = _extract_command_lines(output_text_2)
+                    accepted_1, rejected_1 = _validate_and_normalize_mc_commands(
+                        lines=lines_1,
+                        allowed_blocks=allowed_blocks_agent1,
+                        world_bbox_from=w_from,
+                        world_bbox_to=w_to,
+                        max_commands=max_commands_agent1,
+                    )
+                    accepted_2, rejected_2 = _validate_and_normalize_mc_commands(
+                        lines=lines_2,
+                        allowed_blocks=allowed_blocks_agent2,
+                        world_bbox_from=w_from,
+                        world_bbox_to=w_to,
+                        max_commands=max_commands_agent2,
+                    )
+
+                    merged_cmds = [*accepted_1, *accepted_2]
+                    merged_rejected: list[dict[str, Any]] = [
+                        {"agent_id": 1, **r} for r in rejected_1
+                    ] + [{"agent_id": 2, **r} for r in rejected_2]
+
+                    if args.print_commands:
+                        _eprint(
+                            f"[{task.task_id} sample={sample_id}] "
+                            f"agent1_accepted={len(accepted_1)} agent1_rejected={len(rejected_1)} "
+                            f"agent2_accepted={len(accepted_2)} agent2_rejected={len(rejected_2)} "
+                            f"merged={len(merged_cmds)}"
+                        )
+
+                    mc_result: dict[str, Any] | None = None
+                    metrics: dict[str, Any] = {"latency_s": dt, "latency_s_agent1": dt1, "latency_s_agent2": dt2}
+
+                    score_origin = world_origin if world_origin is not None else [0, 0, 0]
+                    try:
+                        sim_blocks = _simulate_commands_to_scan_blocks(
+                            commands=merged_cmds,
+                            world_bbox_from=w_from,
+                            world_bbox_to=w_to,
+                        )
+                        metrics.update(
+                            _score_str_builder(
+                                task=task,
+                                world_origin=score_origin,
+                                world_scan_blocks=sim_blocks,
+                                chamfer_sigma=chamfer_sigma,
+                            )
+                        )
+                    except Exception as e:
+                        metrics.update({"score_mean": 0.0, "sim_error": str(e)})
+
+                    if mc_enabled and world_origin is not None:
+                        min_x = min(w_from[0], w_to[0])
+                        max_x = max(w_from[0], w_to[0])
+                        min_y = min(w_from[1], w_to[1])
+                        max_y = max(w_from[1], w_to[1])
+                        min_z = min(w_from[2], w_to[2])
+                        max_z = max(w_from[2], w_to[2])
+                        tp_x = (min_x + max_x) // 2
+                        tp_y = min_y
+                        tp_z1 = max_z + 2
+                        tp_z2 = max_z + 4
+
+                        pre_cmds_1: list[str] = []
+                        if mc_teleport_before_each:
+                            pre_cmds_1.append(f"/tp {mc_username} {tp_x} {tp_y} {tp_z1}")
+                            pre_cmds_1.append(f"/tp {mc_username2} {tp_x} {tp_y} {tp_z2}")
+                        if mc_reset_before_each:
+                            pre_cmds_1.append(f"/fill {min_x} {min_y} {min_z} {max_x} {max_y} {max_z} air")
+
+                        try:
+                            mc_result = _run_mc_executor_multi(
+                                node_script=node_script,
+                                host=mc_host,
+                                port=mc_port,
+                                username1=mc_username,
+                                username2=mc_username2,
+                                version=mc_version,
+                                step_delay_ms=mc_step_delay_ms,
+                                scan_delay_ms=mc_scan_delay_ms,
+                                timeout_ms=mc_timeout_ms,
+                                pre_commands_1=pre_cmds_1,
+                                commands_1=accepted_1,
+                                post_commands_1=[],
+                                pre_commands_2=[],
+                                commands_2=accepted_2,
+                                post_commands_2=[],
+                                scan_from=[min_x, min_y, min_z],
+                                scan_to=[max_x, max_y, max_z],
+                            )
+                            scan = (mc_result.get("scan") or {}) if isinstance(mc_result, dict) else {}
+                            scan_blocks = scan.get("blocks") if isinstance(scan, dict) else None
+                            if isinstance(scan_blocks, list):
+                                mc_metrics = _score_str_builder(
+                                    task=task,
+                                    world_origin=world_origin,
+                                    world_scan_blocks=scan_blocks,
+                                    chamfer_sigma=chamfer_sigma,
+                                )
+                                metrics.update({f"mc_{k}": v for k, v in mc_metrics.items()})
+                            else:
+                                metrics.update({"mc_error": "missing scan blocks"})
+                        except Exception as e:
+                            metrics.update({"mc_error": str(e)})
+
+                    record: dict[str, Any] = {
+                        "run_name": run_name,
+                        "task_id": task.task_id,
+                        "dataset_path": str(csv_path),
+                        "dataset_row": task.csv_row_index,
+                        "sample_id": sample_id,
+                        "num_agents": num_agents,
+                        "model": {
+                            "backend": backend,
+                            "model_id": loaded.model_id,
+                        },
+                        "generation": generation_cfg,
+                        "metrics": metrics,
+                        "output_text": output_text,
+                        "agents": [
+                            {
+                                "agent_id": 1,
+                                "model_id": loaded.model_id,
+                                "allowed_blocks": allowed_blocks_agent1,
+                                "output_text": output_text_1,
+                                "commands": accepted_1,
+                                "rejected_commands": rejected_1,
+                                "prompt": {
+                                    "user": user_prompt_1,
+                                    "rendered": prompt_text_1,
+                                    "chat_messages": chat_messages_1,
+                                }
+                                if write_prompt
+                                else None,
+                            },
+                            {
+                                "agent_id": 2,
+                                "model_id": loaded.model_id,
+                                "allowed_blocks": allowed_blocks_agent2,
+                                "output_text": output_text_2,
+                                "commands": accepted_2,
+                                "rejected_commands": rejected_2,
+                                "prompt": {
+                                    "user": user_prompt_2,
+                                    "rendered": prompt_text_2,
+                                    "chat_messages": chat_messages_2,
+                                }
+                                if write_prompt
+                                else None,
+                            },
+                        ],
+                        "commands": merged_cmds,
+                        "rejected_commands": merged_rejected,
+                        "mc_result": mc_result,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    }
+                    if write_task:
+                        record["task"] = {
+                            "task_id": task.task_id,
+                            "string": task.text,
+                            "difficulty": task.difficulty,
+                            "bbox": {"from": task.local_bbox_from, "to": task.local_bbox_to},
+                            "target_rows_topdown": task.target_rows_topdown,
+                            "allowed_blocks_by_agent": {
+                                "agent1": allowed_blocks_agent1,
+                                "agent2": allowed_blocks_agent2,
+                            },
+                        }
+
+                    write_record(record)
+                    write_simple_record(
+                        {
+                            "task_id": task.task_id,
+                            "string": task.text,
+                            "difficulty": task.difficulty,
+                            "model_id": loaded.model_id,
+                            "score_shape_overlap": _pick_primary_metric(metrics, "score_shape_overlap"),
+                            "score_components": _pick_primary_metric(metrics, "score_components"),
+                            "score_material_adjacent": _pick_primary_metric(metrics, "score_material_adjacent"),
+                        }
+                    )
+                _eprint(f"[{idx}/{len(tasks)}] {task.task_id} samples={n} {dt:.2f}s")
+
     finally:
         close_writer()
         close_simple_writer()
