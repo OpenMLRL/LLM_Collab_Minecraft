@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import Any, Callable, Dict, List, Mapping
 
 from LLM_Collab_MC.utils.str_builder import (
@@ -79,6 +80,80 @@ def get_reward_function(*, cfg: Dict[str, Any], num_agents: int) -> Callable[...
         except Exception:
             return 0.0
 
+    debug_cfg = cfg.get("debug") or {}
+    if not isinstance(debug_cfg, dict):
+        debug_cfg = {}
+
+    debug_enabled = bool(debug_cfg.get("enabled", False)) or (os.environ.get("STR_BUILDER_DEBUG_ASCII") == "1")
+    debug_max_prints = _as_int(debug_cfg.get("max_prints"), 0)
+    if debug_enabled and debug_max_prints <= 0:
+        debug_max_prints = 10
+    debug_every_n_calls = _as_int(debug_cfg.get("every_n_calls"), 0)
+    debug_empty_char = str(debug_cfg.get("empty_char") or ".")[:1] or "."
+
+    debug_state = {"calls": 0, "printed": 0}
+
+    def _block_to_color_initial(block_id: str) -> str:
+        s = str(block_id or "").strip().lower()
+        if s.startswith("minecraft:"):
+            s = s[len("minecraft:") :]
+        if not s:
+            return "#"
+        color = s.split("_", 1)[0]
+        return (color[:1] or s[:1] or "#").upper()
+
+    def _render_overlay_ascii(task: TaskSpec, blocks: List[Mapping[str, Any]]) -> str:
+        height = len(task.target_rows_topdown)
+        width = len(task.target_rows_topdown[0]) if height else 0
+
+        obs: Dict[tuple[int, int], str] = {}
+        for b in blocks:
+            pos = b.get("pos")
+            name = b.get("name")
+            if not (isinstance(pos, list) and len(pos) == 3):
+                continue
+            if name is None:
+                continue
+            block = str(name).strip()
+            if not block or block in ("air", "cave_air", "void_air"):
+                continue
+            obs[(int(pos[0]), int(pos[1]))] = block
+
+        lines: List[str] = []
+        for r, row in enumerate(task.target_rows_topdown):
+            out = []
+            for x in range(width):
+                wx = task.local_bbox_from[0] + x
+                wy = task.local_bbox_from[1] + (height - 1 - r)
+                placed = obs.get((wx, wy))
+                if placed is not None:
+                    out.append(_block_to_color_initial(placed))
+                elif x < len(row) and row[x] == "#":
+                    out.append("#")
+                else:
+                    out.append(debug_empty_char)
+            lines.append("".join(out))
+        return "\n".join(lines)
+
+    def _maybe_debug_print(*, task: TaskSpec, reward: float, metrics: Mapping[str, Any], blocks: List[Mapping[str, Any]]) -> None:
+        if not debug_enabled:
+            return
+        debug_state["calls"] += 1
+        if debug_state["printed"] >= debug_max_prints:
+            return
+        if debug_every_n_calls > 0 and (debug_state["calls"] % debug_every_n_calls) != 0:
+            return
+        debug_state["printed"] += 1
+        prefix = (
+            f"[str_builder debug] {task.task_id} text={task.text!r} diff={task.difficulty} "
+            f"reward={reward:.4f} "
+            f"s1={float(metrics.get('score_shape_overlap', 0.0)):.3f} "
+            f"s2={float(metrics.get('score_components', 0.0)):.3f} "
+            f"s3={float(metrics.get('score_material_adjacent', 0.0)):.3f}"
+        )
+        print(prefix, flush=True)
+        print(_render_overlay_ascii(task, blocks), flush=True)
+
     if num_agents == 1:
         max_commands_agent1 = max_commands_total
 
@@ -100,7 +175,9 @@ def get_reward_function(*, cfg: Dict[str, Any], num_agents: int) -> Callable[...
 
             blocks = simulate_commands_to_scan_blocks(commands=accepted, world_bbox_from=world_bbox_from, world_bbox_to=world_bbox_to)
             metrics = score_str_builder(task=task, world_origin=[0, 0, 0], world_scan_blocks=blocks, chamfer_sigma=chamfer_sigma)
-            return [_reward_from_metrics(metrics)]
+            reward = _reward_from_metrics(metrics)
+            _maybe_debug_print(task=task, reward=reward, metrics=metrics, blocks=blocks)
+            return [reward]
 
         return reward_fn
 
@@ -145,6 +222,8 @@ def get_reward_function(*, cfg: Dict[str, Any], num_agents: int) -> Callable[...
         merged = [*accepted_1, *accepted_2]
         blocks = simulate_commands_to_scan_blocks(commands=merged, world_bbox_from=world_bbox_from, world_bbox_to=world_bbox_to)
         metrics = score_str_builder(task=task, world_origin=[0, 0, 0], world_scan_blocks=blocks, chamfer_sigma=chamfer_sigma)
-        return [_reward_from_metrics(metrics)]
+        reward = _reward_from_metrics(metrics)
+        _maybe_debug_print(task=task, reward=reward, metrics=metrics, blocks=blocks)
+        return [reward]
 
     return reward_fn

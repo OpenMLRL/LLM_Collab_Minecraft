@@ -6,11 +6,11 @@ seed: 42
 
 collab:
   # GRPO = num_agents=1. (CoMLRL's MAGRPOTrainer supports num_agents>=1.)
-  num_agents: 2
+  num_agents: 1
 
 data:
   # Path is resolved relative to this config file.
-  csv_path: ../dataset/str_builder/data2.csv
+  csv_path: ../dataset/str_builder/data3.csv
   split_ratio: 0.8
   spacing: 1
   local_z: 0
@@ -21,7 +21,7 @@ task:
   # Allowed blocks for agent2 (only used when collab.num_agents=2).
   block_agent2: [red_concrete]
   # Cap accepted commands per agent (extra commands are rejected for reward).
-  max_commands: 600
+  max_commands: 300
   # S_shape = exp(-CD / sigma)
   chamfer_sigma: 2.0
 
@@ -144,6 +144,17 @@ trainer:
   joint_mode: aligned
   # normalize_advantage: true
   # epsilon_clip: 12
+
+debug:
+  # Prints an ASCII overlay per reward call:
+  # - placed blocks are shown as the first letter of the block color (W/B/R/...)
+  # - missing target blocks are shown as '#'
+  enabled: true
+  max_prints: 1000
+  # If >0, print every N reward calls (in addition to max_prints cap).
+  every_n_calls: 0
+  # Character for empty cells in the debug render.
+  empty_char: "."
 
 reward_processor:
   enabled: false
