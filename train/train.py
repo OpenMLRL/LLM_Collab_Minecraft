@@ -77,9 +77,34 @@ def _build_formatters(cfg: Dict[str, Any], *, num_agents: int) -> List[Any]:
     task_cfg = cfg.get("task") or {}
     if not isinstance(task_cfg, dict):
         task_cfg = {}
-    block_even = str(task_cfg.get("block_even") or "white_concrete")
-    block_odd = str(task_cfg.get("block_odd") or "black_concrete")
-    block_agent2 = str(task_cfg.get("block_agent2") or "red_concrete")
+
+    def _as_block_list(v: Any) -> List[str]:
+        if v is None:
+            return []
+        if isinstance(v, (list, tuple)):
+            out = []
+            for x in v:
+                s = str(x).strip()
+                if s:
+                    out.append(s)
+            return out
+        s = str(v).strip()
+        return [s] if s else []
+
+    agent1_blocks = _as_block_list(task_cfg.get("block_agent1"))
+    if not agent1_blocks:
+        # Backwards compatible fallback.
+        b0 = str(task_cfg.get("block_even") or "white_concrete").strip()
+        b1 = str(task_cfg.get("block_odd") or "black_concrete").strip()
+        agent1_blocks = [b0, b1]
+
+    agent2_blocks = _as_block_list(task_cfg.get("block_agent2"))
+    if not agent2_blocks:
+        # Backwards compatible fallback.
+        agent2_blocks = [str(task_cfg.get("block_agent2") or "red_concrete").strip() or "red_concrete"]
+
+    block_agent1_lines = "\n".join(f"- {b}" for b in agent1_blocks)
+    block_agent2_lines = "\n".join(f"- {b}" for b in agent2_blocks)
 
     def _render(item: Dict[str, Any], tmpl: str) -> str:
         w_from = item.get("local_bbox_from") or [0, 0, 0]
@@ -90,9 +115,8 @@ def _build_formatters(cfg: Dict[str, Any], *, num_agents: int) -> List[Any]:
             difficulty=int(item.get("difficulty") or 0),
             world_bbox_from=json.dumps(w_from, separators=(",", ":")),
             world_bbox_to=json.dumps(w_to, separators=(",", ":")),
-            block_even=block_even,
-            block_odd=block_odd,
-            block_agent2=block_agent2,
+            block_agent1_lines=block_agent1_lines,
+            block_agent2_lines=block_agent2_lines,
         ).rstrip()
         if system_prompt:
             return system_prompt + "\n\n" + user
@@ -112,7 +136,7 @@ def main() -> int:
     parser.add_argument(
         "--config",
         type=str,
-        default=os.path.join(REPO_ROOT, "configs", "config.yaml"),
+        default=os.path.join(REPO_ROOT, "configs", "str_builder_config.yaml"),
         help="Path to YAML config",
     )
     parser.add_argument("--override", type=str, default=None, help="key.path=value overrides, comma-separated")
@@ -274,4 +298,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

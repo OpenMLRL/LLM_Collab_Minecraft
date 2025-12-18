@@ -52,6 +52,6 @@ Important: `op executor_bot` is a Minecraft server/admin command (not a bash com
 
 ## Train (str_builder, GRPO)
 
-- Config: `configs/config.yaml`
-- Local (requires GPU + `comlrl` env): `python3 train/train.py --config configs/config.yaml`
+- Config: `configs/str_builder_config.yaml`
+- Local (requires GPU + `comlrl` env): `python3 train/train.py --config configs/str_builder_config.yaml`
 - Slurm: copy `scripts/train_str_builder_grpo_sbatch.example.sh` to `scripts/train_str_builder_grpo_sbatch.sh` (ignored by git), then run it.

@@ -67,6 +67,13 @@ def get_trainer_args(cfg: Dict[str, Any]) -> MAGRPOConfig:
 
     lr_val = tr.get("learning_rate", tr.get("lr", 3e-5))
 
+    joint_mode = tr.get("joint_mode", tr.get("joint_action_mode", None))
+    joint_mode_str = str(joint_mode or "aligned").strip().lower()
+    if joint_mode_str in ("align", "aligned"):
+        joint_mode_str = "aligned"
+    elif joint_mode_str in ("cross", "crossed"):
+        joint_mode_str = "cross"
+
     candidate = {
         "output_dir": output_dir_resolved,
         "num_train_epochs": _as_int(tr.get("num_train_epochs", 3), 3),
@@ -79,6 +86,7 @@ def get_trainer_args(cfg: Dict[str, Any]) -> MAGRPOConfig:
         "temperature": _as_float(tr.get("temperature", 0.2), 0.2),
         "top_p": _as_float(tr.get("top_p", 0.95), 0.95),
         "num_turns": _as_int(tr.get("num_turns", 1), 1),
+        "joint_mode": joint_mode_str,
         "normalize_advantage": bool(tr.get("normalize_advantage", False)),
         "epsilon_clip": _as_opt_float(tr.get("epsilon_clip", None), None),
     }
@@ -101,4 +109,3 @@ def get_trainer_args(cfg: Dict[str, Any]) -> MAGRPOConfig:
         pass
 
     return cfg_obj
-

@@ -6,7 +6,7 @@ seed: 42
 
 collab:
   # GRPO = num_agents=1. (CoMLRL's MAGRPOTrainer supports num_agents>=1.)
-  num_agents: 1
+  num_agents: 2
 
 data:
   # Path is resolved relative to this config file.
@@ -17,10 +17,9 @@ data:
 
 task:
   # Allowed blocks for agent1 (and single-agent).
-  block_even: white_concrete
-  block_odd: black_concrete
-  # Allowed block for agent2 (only used when collab.num_agents=2).
-  block_agent2: red_concrete
+  block_agent1: [white_concrete, black_concrete]
+  # Allowed blocks for agent2 (only used when collab.num_agents=2).
+  block_agent2: [red_concrete]
   # Cap accepted commands per agent (extra commands are rejected for reward).
   max_commands: 600
   # S_shape = exp(-CD / sigma)
@@ -48,9 +47,8 @@ prompt:
     - y increases from min_y to max_y (bottom to top).
     - z is constant (min_z == max_z).
 
-    Available blocks (use ONLY these two):
-    - {block_even}
-    - {block_odd}
+    Available blocks (use ONLY these):
+    {block_agent1_lines}
 
     Constraints:
     - Output ONLY Minecraft commands, one per line.
@@ -78,9 +76,8 @@ prompt:
     - y increases from min_y to max_y (bottom to top).
     - z is constant (min_z == max_z).
 
-    Available blocks (use ONLY these two):
-    - {block_even}
-    - {block_odd}
+    Available blocks (use ONLY these):
+    {block_agent1_lines}
 
     Constraints:
     - Output ONLY Minecraft commands, one per line.
@@ -107,8 +104,8 @@ prompt:
     - y increases from min_y to max_y (bottom to top).
     - z is constant (min_z == max_z).
 
-    Available blocks (use ONLY this block):
-    - {block_agent2}
+    Available blocks (use ONLY these):
+    {block_agent2_lines}
 
     Constraints:
     - Output ONLY Minecraft commands, one per line.
@@ -133,16 +130,18 @@ model:
 trainer:
   # Set by scripts (supports [jobid] placeholder).
   output_dir: TODO
-  num_train_epochs: 3
+  num_train_epochs: 10
   per_device_train_batch_size: 1
   learning_rate: 1e-5
   logging_steps: 20
   save_steps: 200
   num_generations: 4
-  max_new_tokens: 768
+  max_new_tokens: 1024
   temperature: 0.2
   top_p: 0.95
   num_turns: 1
+  # comlrl MAGRPOConfig.joint_mode: aligned (index-aligned) | cross (Cartesian product)
+  joint_mode: aligned
   # normalize_advantage: true
   # epsilon_clip: 12
 
@@ -163,6 +162,6 @@ wandb:
   output_dir: TODO
 
 output:
-  save_final_model: true
+  save_final_model: false
   # Set by scripts (supports [jobid] placeholder).
   save_path: TODO

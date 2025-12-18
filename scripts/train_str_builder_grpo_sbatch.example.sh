@@ -11,7 +11,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-CONFIG_REL="configs/config.yaml"
+CONFIG_REL="configs/str_builder_config.yaml"
 TRAIN_REL="train/train.py"
 
 # SLURM defaults (override via env)
@@ -82,4 +82,3 @@ sbatch \
   --wrap="${WRAP_CMD}"
 
 echo "Submitted str_builder GRPO training job with config: ${CONFIG_PATH}"
-

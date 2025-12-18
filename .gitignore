@@ -14,3 +14,4 @@ baselines/**/config.mc*.yaml
 # Training scripts
 scripts/**/*.sh
 !scripts/**/*.example.sh
+scripts/**/*.out

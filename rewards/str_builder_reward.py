@@ -39,9 +39,6 @@ def get_reward_function(*, cfg: Dict[str, Any], num_agents: int) -> Callable[...
     if not isinstance(task_cfg, dict):
         task_cfg = {}
 
-    block_even = str(task_cfg.get("block_even") or "white_concrete")
-    block_odd = str(task_cfg.get("block_odd") or "black_concrete")
-    block_agent2 = str(task_cfg.get("block_agent2") or "red_concrete")
     max_commands_total = _as_int(task_cfg.get("max_commands"), 600)
 
     data_cfg = cfg.get("data") or {}
@@ -49,8 +46,30 @@ def get_reward_function(*, cfg: Dict[str, Any], num_agents: int) -> Callable[...
         data_cfg = {}
     chamfer_sigma = float(task_cfg.get("chamfer_sigma") or data_cfg.get("chamfer_sigma") or 2.0)
 
-    allowed_blocks_agent1 = [block_even, block_odd]
-    allowed_blocks_agent2 = [block_agent2]
+    def _as_block_list(v: Any) -> List[str]:
+        if v is None:
+            return []
+        if isinstance(v, (list, tuple)):
+            out = []
+            for x in v:
+                s = str(x).strip()
+                if s:
+                    out.append(s)
+            return out
+        s = str(v).strip()
+        return [s] if s else []
+
+    allowed_blocks_agent1 = _as_block_list(task_cfg.get("block_agent1"))
+    if not allowed_blocks_agent1:
+        # Backwards compatible fallback.
+        b0 = str(task_cfg.get("block_even") or "white_concrete").strip()
+        b1 = str(task_cfg.get("block_odd") or "black_concrete").strip()
+        allowed_blocks_agent1 = [b0, b1]
+
+    allowed_blocks_agent2 = _as_block_list(task_cfg.get("block_agent2"))
+    if not allowed_blocks_agent2:
+        # Backwards compatible fallback.
+        allowed_blocks_agent2 = [str(task_cfg.get("block_agent2") or "red_concrete").strip() or "red_concrete"]
 
     def _reward_from_metrics(metrics: Mapping[str, Any]) -> float:
         try:
