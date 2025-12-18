@@ -1,0 +1,168 @@
+run_name: str_builder_grpo
+
+# When fixed_seed=false, a random seed is chosen at runtime.
+fixed_seed: false
+seed: 42
+
+collab:
+  # GRPO = num_agents=1. (CoMLRL's MAGRPOTrainer supports num_agents>=1.)
+  num_agents: 1
+
+data:
+  # Path is resolved relative to this config file.
+  csv_path: ../dataset/str_builder/data.csv
+  split_ratio: 0.8
+  spacing: 1
+  local_z: 0
+
+task:
+  # Allowed blocks for agent1 (and single-agent).
+  block_even: white_concrete
+  block_odd: black_concrete
+  # Allowed block for agent2 (only used when collab.num_agents=2).
+  block_agent2: red_concrete
+  # Cap accepted commands per agent (extra commands are rejected for reward).
+  max_commands: 600
+  # S_shape = exp(-CD / sigma)
+  chamfer_sigma: 2.0
+
+prompt:
+  system: |
+    You are a Minecraft building agent.
+    Output must be Minecraft commands only (no markdown, no code fences, no extra text).
+
+  # Single-agent prompt.
+  user_template: |
+    Build the following uppercase string as 5x7 block letters on a 2D plane (z is constant).
+
+    String: {text}
+    Difficulty: {difficulty}
+
+    WORLD bbox (inclusive):
+    - from: {world_bbox_from}
+    - to:   {world_bbox_to}
+
+    Coordinate mapping (absolute coords):
+    - Let (min_x, min_y, min_z) be bbox.from and (max_x, max_y, max_z) be bbox.to.
+    - x increases from min_x to max_x (left to right).
+    - y increases from min_y to max_y (bottom to top).
+    - z is constant (min_z == max_z).
+
+    Available blocks (use ONLY these two):
+    - {block_even}
+    - {block_odd}
+
+    Constraints:
+    - Output ONLY Minecraft commands, one per line.
+    - Allowed commands: /setblock, /fill
+    - Use absolute integer coordinates only (no ~).
+    - Build ONLY the letters. Do NOT build a background/canvas.
+    - Adjacent constraint: any two 4-neighbor adjacent blocks you place must have different block types.
+    - Every coordinate must be within the bbox.
+
+  # Optional overrides used when collab.num_agents=2.
+  user_template_agent1: |
+    You are Agent 1 in a 2-person Minecraft building team. You will place SOME of the blocks for the final build.
+
+    Task: Build the uppercase string as 5x7 block letters on a 2D plane (z is constant).
+    String: {text}
+    Difficulty: {difficulty}
+
+    WORLD bbox (inclusive):
+    - from: {world_bbox_from}
+    - to:   {world_bbox_to}
+
+    Coordinate mapping (absolute coords):
+    - Let (min_x, min_y, min_z) be bbox.from and (max_x, max_y, max_z) be bbox.to.
+    - x increases from min_x to max_x (left to right).
+    - y increases from min_y to max_y (bottom to top).
+    - z is constant (min_z == max_z).
+
+    Available blocks (use ONLY these two):
+    - {block_even}
+    - {block_odd}
+
+    Constraints:
+    - Output ONLY Minecraft commands, one per line.
+    - Allowed commands: /setblock, /fill
+    - Use absolute integer coordinates only (no ~).
+    - Build ONLY the letters. Do NOT build a background/canvas.
+    - Team constraint: in the final build, any two 4-neighbor adjacent blocks must have different block types.
+    - Every coordinate must be within the bbox.
+
+  user_template_agent2: |
+    You are Agent 2 in a 2-person Minecraft building team. You will place SOME of the blocks for the final build.
+
+    Task: Build the uppercase string as 5x7 block letters on a 2D plane (z is constant).
+    String: {text}
+    Difficulty: {difficulty}
+
+    WORLD bbox (inclusive):
+    - from: {world_bbox_from}
+    - to:   {world_bbox_to}
+
+    Coordinate mapping (absolute coords):
+    - Let (min_x, min_y, min_z) be bbox.from and (max_x, max_y, max_z) be bbox.to.
+    - x increases from min_x to max_x (left to right).
+    - y increases from min_y to max_y (bottom to top).
+    - z is constant (min_z == max_z).
+
+    Available blocks (use ONLY this block):
+    - {block_agent2}
+
+    Constraints:
+    - Output ONLY Minecraft commands, one per line.
+    - Allowed commands: /setblock, /fill
+    - Use absolute integer coordinates only (no ~).
+    - Build ONLY the letters. Do NOT build a background/canvas.
+    - Team constraint: in the final build, any two 4-neighbor adjacent blocks must have different block types.
+    - Every coordinate must be within the bbox.
+
+model:
+  name: Qwen/Qwen3-4B-Instruct-2507
+  tokenizer_kwargs: {}
+  model_kwargs:
+    trust_remote_code: true
+    device_map: auto
+    low_cpu_mem_usage: true
+    attn_implementation: sdpa
+  # dtype: bf16 | fp16 | fp32 | auto
+  dtype: bf16
+  gradient_checkpointing: true
+
+trainer:
+  # Set by scripts (supports [jobid] placeholder).
+  output_dir: TODO
+  num_train_epochs: 3
+  per_device_train_batch_size: 1
+  learning_rate: 1e-5
+  logging_steps: 20
+  save_steps: 200
+  num_generations: 4
+  max_new_tokens: 768
+  temperature: 0.2
+  top_p: 0.95
+  num_turns: 1
+  # normalize_advantage: true
+  # epsilon_clip: 12
+
+reward_processor:
+  enabled: false
+  scale_factor: 1.0
+  shift: null
+
+patches:
+  generation_memory: true
+  single_agent_returns: true
+
+wandb:
+  enabled: true
+  project: str_builder
+  entity: null
+  # Set by scripts (supports [jobid] placeholder).
+  output_dir: TODO
+
+output:
+  save_final_model: true
+  # Set by scripts (supports [jobid] placeholder).
+  save_path: TODO

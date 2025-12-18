@@ -10,3 +10,7 @@ baselines/**/slurm_logs/
 baselines/**/run.sh
 baselines/**/run_sbatch.sh
 baselines/**/config.mc*.yaml
+
+# Training scripts
+scripts/**/*.sh
+!scripts/**/*.example.sh

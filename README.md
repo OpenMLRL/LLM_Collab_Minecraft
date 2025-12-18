@@ -49,3 +49,9 @@ Important: `op executor_bot` is a Minecraft server/admin command (not a bash com
 - Slurm: copy `baselines/str_builder/run.example.sh` to `baselines/str_builder/run.sh` (ignored by git), then `bash baselines/str_builder/run.sh baselines/str_builder/config.yaml`
 - If you need `minecraft.enabled=true` on Slurm: use `baselines/2d_painting/run_sbatch.example.sh` (see `baselines/2d_painting/README.md`)
 - If you need `minecraft.enabled=true` on Slurm: use `baselines/str_builder/run_sbatch.example.sh` (see `baselines/str_builder/README.md`)
+
+## Train (str_builder, GRPO)
+
+- Config: `configs/config.yaml`
+- Local (requires GPU + `comlrl` env): `python3 train/train.py --config configs/config.yaml`
+- Slurm: copy `scripts/train_str_builder_grpo_sbatch.example.sh` to `scripts/train_str_builder_grpo_sbatch.sh` (ignored by git), then run it.
