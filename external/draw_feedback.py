@@ -82,6 +82,7 @@ def format_followup_prompts(
             "Feedback (ASCII maps):",
             "- Target mask: '.' empty, '#' should place a block (any allowed type).",
             "- Current progress: '.' empty, '#' missing target, letters = first letter of the placed block color.",
+            "- Deletion is allowed: use /setblock ... air or /fill ... air to remove blocks.",
             "",
             "Target mask:",
             target_ascii,
@@ -112,4 +113,3 @@ def format_followup_prompts(
         prompts[agent_idx] = "\n".join(parts).strip()
 
     return prompts
-

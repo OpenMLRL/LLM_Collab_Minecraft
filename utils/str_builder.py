@@ -65,6 +65,7 @@ def validate_and_normalize_mc_commands(
     max_commands: int,
 ) -> Tuple[List[str], List[Dict[str, Any]]]:
     allowed = {normalize_block_id(b) for b in allowed_blocks}
+    allowed.add("air")
     min_x = min(world_bbox_from[0], world_bbox_to[0])
     max_x = max(world_bbox_from[0], world_bbox_to[0])
     min_y = min(world_bbox_from[1], world_bbox_to[1])
