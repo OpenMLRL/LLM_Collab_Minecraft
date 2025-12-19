@@ -24,6 +24,10 @@ import torch  # type: ignore
 from comlrl.trainers.magrpo import MAGRPOTrainer  # type: ignore
 from comlrl.utils.reward_processor import RewardProcessors  # type: ignore
 
+from LLM_Collab_MC.external import (
+    get_external_transition as external_get_transition,
+    set_context_resolver as external_set_context_resolver,
+)
 from LLM_Collab_MC.rewards.str_builder_reward import get_reward_function
 from LLM_Collab_MC.utils.config import apply_overrides, expand_jobid_placeholder, load_yaml, resolve_path
 from LLM_Collab_MC.utils.patches import apply_default_patches
@@ -106,7 +110,16 @@ def _build_formatters(cfg: Dict[str, Any], *, num_agents: int) -> List[Any]:
     block_agent1_lines = "\n".join(f"- {b}" for b in agent1_blocks)
     block_agent2_lines = "\n".join(f"- {b}" for b in agent2_blocks)
 
+    def _prompt_override(item: Dict[str, Any]) -> str | None:
+        p = item.get("prompt")
+        if isinstance(p, str) and "\n" in p:
+            return p.strip()
+        return None
+
     def _render(item: Dict[str, Any], tmpl: str) -> str:
+        override = _prompt_override(item)
+        if override is not None:
+            return override
         w_from = item.get("local_bbox_from") or [0, 0, 0]
         w_to = item.get("local_bbox_to") or [0, 0, 0]
         user = tmpl.format(
@@ -265,6 +278,16 @@ def main() -> int:
 
     apply_default_patches(cfg)
 
+    is_multi_turn = False
+    try:
+        is_multi_turn = int(getattr(magrpo_args, "num_turns", 1)) > 1
+    except Exception:
+        is_multi_turn = False
+
+    external_cfg = cfg.get("external") or {}
+    if not isinstance(external_cfg, dict):
+        external_cfg = {}
+
     trainer_kwargs: Dict[str, Any] = {
         "agents": agents,
         "num_agents": num_agents,
@@ -279,6 +302,132 @@ def main() -> int:
     }
     if reward_processor is not None:
         trainer_kwargs["reward_processor"] = reward_processor
+
+    if is_multi_turn:
+        def _normalize_key(s: str) -> str:
+            return " ".join((s or "").split()).strip()
+
+        prompt_cfg = cfg.get("prompt") or {}
+        if not isinstance(prompt_cfg, dict):
+            prompt_cfg = {}
+        system_prompt = str(prompt_cfg.get("system") or "").rstrip()
+        user_template = str(prompt_cfg.get("user_template") or "").rstrip()
+        user_template_agent1 = str(prompt_cfg.get("user_template_agent1") or user_template).rstrip()
+        user_template_agent2 = str(prompt_cfg.get("user_template_agent2") or user_template).rstrip()
+
+        task_cfg = cfg.get("task") or {}
+        if not isinstance(task_cfg, dict):
+            task_cfg = {}
+
+        max_commands_total = int(task_cfg.get("max_commands") or 600)
+
+        def _as_block_list(v: Any) -> List[str]:
+            if v is None:
+                return []
+            if isinstance(v, (list, tuple)):
+                out = []
+                for x in v:
+                    s = str(x).strip()
+                    if s:
+                        out.append(s)
+                return out
+            s = str(v).strip()
+            return [s] if s else []
+
+        agent1_blocks = _as_block_list(task_cfg.get("block_agent1"))
+        if not agent1_blocks:
+            b0 = str(task_cfg.get("block_even") or "white_concrete").strip()
+            b1 = str(task_cfg.get("block_odd") or "black_concrete").strip()
+            agent1_blocks = [b0, b1]
+        agent2_blocks = _as_block_list(task_cfg.get("block_agent2"))
+        if not agent2_blocks:
+            agent2_blocks = [str(task_cfg.get("block_agent2") or "red_concrete").strip() or "red_concrete"]
+
+        block_agent1_lines = "\n".join(f"- {b}" for b in agent1_blocks)
+        block_agent2_lines = "\n".join(f"- {b}" for b in agent2_blocks)
+
+        context_map: Dict[str, Any] = {}
+
+        def _register_split(ds: Any) -> None:
+            if ds is None:
+                return
+            try:
+                n = len(ds)
+            except Exception:
+                return
+            for idx in range(n):
+                try:
+                    item = ds[idx]
+                except Exception:
+                    continue
+                w_from = item.get("local_bbox_from") or [0, 0, 0]
+                w_to = item.get("local_bbox_to") or [0, 0, 0]
+                fmt_kwargs = {
+                    "task_id": str(item.get("task_id") or ""),
+                    "text": str(item.get("string") or ""),
+                    "difficulty": int(item.get("difficulty") or 0),
+                    "world_bbox_from": json.dumps(w_from, separators=(",", ":")),
+                    "world_bbox_to": json.dumps(w_to, separators=(",", ":")),
+                    "block_agent1_lines": block_agent1_lines,
+                    "block_agent2_lines": block_agent2_lines,
+                }
+                payload = {
+                    "system_prompt": system_prompt,
+                    "user_prompt_single": user_template.format(**fmt_kwargs).rstrip(),
+                    "user_prompt_agent1": user_template_agent1.format(**fmt_kwargs).rstrip(),
+                    "user_prompt_agent2": user_template_agent2.format(**fmt_kwargs).rstrip(),
+                    "task_id": str(item.get("task_id") or ""),
+                    "text": str(item.get("string") or ""),
+                    "difficulty": int(item.get("difficulty") or 0),
+                    "local_bbox_from": [int(v) for v in (w_from or [0, 0, 0])],
+                    "local_bbox_to": [int(v) for v in (w_to or [0, 0, 0])],
+                    "target_rows_topdown": [str(r) for r in (item.get("target_rows_topdown") or [])],
+                    "allowed_blocks_agent1": list(agent1_blocks),
+                    "allowed_blocks_agent2": list(agent2_blocks),
+                    "max_commands_total": max_commands_total,
+                }
+
+                ds_key = _normalize_key(str(item.get("prompt") or ""))
+                if ds_key:
+                    context_map[ds_key] = payload
+
+                for fmt in formatters:
+                    try:
+                        p = fmt(item)
+                    except Exception:
+                        p = ""
+                    key = _normalize_key(str(p))
+                    if key:
+                        context_map[key] = payload
+
+        _register_split(train_ds)
+        _register_split(eval_ds)
+
+        def _resolver(p: str) -> Any:
+            return context_map.get(_normalize_key(p))
+
+        external_set_context_resolver(_resolver)
+
+        external_mode = str(external_cfg.get("mode") or "draw_feedback")
+        original_prompt_flag = bool(external_cfg.get("original_prompt", True))
+        previous_response_flag = bool(external_cfg.get("previous_response", False))
+
+        num_agents_default = int(num_agents)
+
+        def external_transition_wrapper(prompt: str, agent_completions: Any, num_agents: int | None = None, **_kwargs: Any) -> Any:
+            n_agents = int(num_agents) if num_agents is not None else num_agents_default
+            return external_get_transition(
+                prompt=prompt,
+                agent_completions=agent_completions,
+                num_agents=n_agents,
+                mode=external_mode,
+                original_prompt=original_prompt_flag,
+                previous_response=previous_response_flag,
+                prompt_history_per_agent=_kwargs.get("prompt_history_per_agent"),
+                response_history_per_agent=_kwargs.get("response_history_per_agent"),
+            )
+
+        trainer_kwargs["external_transition"] = external_transition_wrapper
 
     trainer = MAGRPOTrainer(**trainer_kwargs)
     trainer.train()

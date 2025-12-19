@@ -55,3 +55,4 @@ Important: `op executor_bot` is a Minecraft server/admin command (not a bash com
 - Config: `configs/str_builder_config.yaml`
 - Local (requires GPU + `comlrl` env): `python3 train/train.py --config configs/str_builder_config.yaml`
 - Slurm: copy `scripts/train_str_builder_grpo_sbatch.example.sh` to `scripts/train_str_builder_grpo_sbatch.sh` (ignored by git), then run it.
+- Multi-turn: set `trainer.num_turns > 1` (uses `external.mode=draw_feedback` for ASCII target/progress feedback).

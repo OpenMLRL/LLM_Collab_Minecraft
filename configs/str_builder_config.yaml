@@ -115,6 +115,14 @@ prompt:
     - Team constraint: in the final build, any two 4-neighbor adjacent blocks must have different block types.
     - Every coordinate must be within the bbox.
 
+external:
+  # Only used when trainer.num_turns > 1.
+  mode: draw_feedback
+  # Include the original (turn-1) prompt after the ASCII feedback.
+  original_prompt: true
+  # Optionally include previous commands verbatim (usually keep false).
+  previous_response: false
+
 model:
   name: Qwen/Qwen3-4B-Instruct-2507
   tokenizer_kwargs: {}
@@ -139,7 +147,8 @@ trainer:
   max_new_tokens: 1024
   temperature: 0.2
   top_p: 0.95
-  num_turns: 1
+  # Set >1 to enable multi-turn training with external feedback prompts.
+  num_turns: 2
   # comlrl MAGRPOConfig.joint_mode: aligned (index-aligned) | cross (Cartesian product)
   joint_mode: aligned
   # normalize_advantage: true

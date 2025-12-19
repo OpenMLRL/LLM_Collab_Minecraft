@@ -313,6 +313,59 @@ def _is_air(block_name: str | None) -> bool:
     return b in {"air", "cave_air", "void_air"}
 
 
+def block_to_color_initial(block_id: str) -> str:
+    s = normalize_block_id(str(block_id or "")).lower()
+    if not s:
+        return "#"
+    color = s.split("_", 1)[0]
+    return (color[:1] or s[:1] or "#").upper()
+
+
+def render_target_ascii(task: TaskSpec) -> str:
+    return "\n".join(str(r) for r in (task.target_rows_topdown or []))
+
+
+def render_progress_overlay_ascii(
+    task: TaskSpec,
+    world_scan_blocks: List[Dict[str, Any]],
+    *,
+    empty_char: str = ".",
+    missing_target_char: str = "#",
+) -> str:
+    height = len(task.target_rows_topdown)
+    width = len(task.target_rows_topdown[0]) if height else 0
+
+    ec = (str(empty_char or ".")[:1]) or "."
+    mc = (str(missing_target_char or "#")[:1]) or "#"
+
+    obs_block: Dict[Tuple[int, int], str] = {}
+    for b in world_scan_blocks:
+        pos = b.get("pos")
+        name = b.get("name")
+        if not (isinstance(pos, list) and len(pos) == 3):
+            continue
+        x, y = int(pos[0]), int(pos[1])
+        if _is_air(None if name is None else str(name)):
+            continue
+        obs_block[(x, y)] = normalize_block_id(str(name))
+
+    lines: List[str] = []
+    for r, row in enumerate(task.target_rows_topdown):
+        out: List[str] = []
+        for x in range(width):
+            wx = task.local_bbox_from[0] + x
+            wy = task.local_bbox_from[1] + (height - 1 - r)
+            placed = obs_block.get((wx, wy))
+            if placed is not None:
+                out.append(block_to_color_initial(placed))
+            elif x < len(row) and row[x] == "#":
+                out.append(mc)
+            else:
+                out.append(ec)
+        lines.append("".join(out))
+    return "\n".join(lines)
+
+
 def _chamfer_distance(points_a: List[Tuple[int, int]], points_b: List[Tuple[int, int]]) -> float:
     if not points_a or not points_b:
         return float("inf")
@@ -434,4 +487,3 @@ def score_str_builder(
         "score_material_adjacent": adj_diff_ratio,
         "score_mean": score_mean,
     }
-
