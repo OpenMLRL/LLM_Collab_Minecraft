@@ -80,6 +80,40 @@ def get_reward_function(*, cfg: Dict[str, Any], num_agents: int) -> Callable[...
         except Exception:
             return 0.0
 
+    def _coverage_ratio(metrics: Mapping[str, Any]) -> float:
+        try:
+            target = float(metrics.get("target_blocks", 0.0))
+            built = float(metrics.get("built_blocks", 0.0))
+            iou = float(metrics.get("overlap_iou", 0.0))
+        except Exception:
+            return 0.0
+        if target <= 0.0 or iou <= 0.0:
+            return 0.0
+        inter = (iou * (target + built)) / (1.0 + iou)
+        return max(0.0, min(1.0, inter / target))
+
+    def _non_target_fill_ratio(task: TaskSpec, metrics: Mapping[str, Any]) -> float:
+        height = len(task.target_rows_topdown)
+        width = len(task.target_rows_topdown[0]) if height else 0
+        total = float(max(0, height * width))
+        if total <= 0.0:
+            return 0.0
+        try:
+            target = float(metrics.get("target_blocks", 0.0))
+            built = float(metrics.get("built_blocks", 0.0))
+            iou = float(metrics.get("overlap_iou", 0.0))
+        except Exception:
+            return 0.0
+        non_target = max(0.0, total - target)
+        if non_target <= 0.0:
+            return 0.0
+        if iou <= 0.0:
+            inter = 0.0
+        else:
+            inter = (iou * (target + built)) / (1.0 + iou)
+        false_pos = max(0.0, built - inter)
+        return max(0.0, min(1.0, false_pos / non_target))
+
     debug_cfg = cfg.get("debug") or {}
     if not isinstance(debug_cfg, dict):
         debug_cfg = {}
@@ -187,6 +221,8 @@ def get_reward_function(*, cfg: Dict[str, Any], num_agents: int) -> Callable[...
             blocks = simulate_commands_to_scan_blocks(commands=accepted, world_bbox_from=world_bbox_from, world_bbox_to=world_bbox_to)
             metrics = score_str_builder(task=task, world_origin=[0, 0, 0], world_scan_blocks=blocks, chamfer_sigma=chamfer_sigma)
             reward = _reward_from_metrics(metrics)
+            if _coverage_ratio(metrics) < 0.35 or _non_target_fill_ratio(task, metrics) > 0.40:
+                reward = 0.0
             _maybe_debug_print(task=task, reward=reward, metrics=metrics, blocks=blocks, turn_idx=turn_idx)
             return [reward]
 
@@ -237,6 +273,8 @@ def get_reward_function(*, cfg: Dict[str, Any], num_agents: int) -> Callable[...
         blocks = simulate_commands_to_scan_blocks(commands=merged, world_bbox_from=world_bbox_from, world_bbox_to=world_bbox_to)
         metrics = score_str_builder(task=task, world_origin=[0, 0, 0], world_scan_blocks=blocks, chamfer_sigma=chamfer_sigma)
         reward = _reward_from_metrics(metrics)
+        if _coverage_ratio(metrics) < 0.35 or _non_target_fill_ratio(task, metrics) > 0.40:
+            reward = 0.0
         _maybe_debug_print(task=task, reward=reward, metrics=metrics, blocks=blocks, turn_idx=turn_idx)
         return [reward]
 

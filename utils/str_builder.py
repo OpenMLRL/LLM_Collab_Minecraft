@@ -449,7 +449,7 @@ def score_str_builder(
 
     cd = _chamfer_distance(list(t_set), list(o_set))
     shape_score = 0.0 if not math.isfinite(cd) else math.exp(-cd / float(chamfer_sigma))
-    score_shape_overlap = 0.5 * shape_score + 0.5 * iou
+    score_shape_overlap = (2.0 * iou) - 1.0
 
     components = _count_components_8(o_set)
     expected = max(0, len(task.text))

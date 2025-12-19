@@ -92,6 +92,7 @@ def format_followup_prompts(
             "- For target '.' positions, you should place air.",
             "- Current progress: '.' empty, '#' missing target, letters = first letter of the placed block color.",
             "- Deletion is allowed: use /setblock ... air or /fill ... air to remove blocks.",
+            "- Do not output ASCII; output commands only.",
             "",
             "Target mask:",
             target_ascii,

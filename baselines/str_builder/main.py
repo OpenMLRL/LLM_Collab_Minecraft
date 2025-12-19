@@ -663,7 +663,7 @@ def _score_str_builder(
 
     cd = _chamfer_distance(list(t_set), list(o_set))
     shape_score = 0.0 if not math.isfinite(cd) else math.exp(-cd / chamfer_sigma)
-    score_shape_overlap = 0.5 * shape_score + 0.5 * iou
+    score_shape_overlap = iou
 
     components = _count_components_8(o_set)
     expected = max(0, len(task.text))
@@ -989,6 +989,17 @@ def main() -> int:
         raise ValueError("generation must be a mapping")
     use_chat_template = bool(generation_cfg.get("use_chat_template", False))
 
+    scoring_cfg = cfg.get("scoring") or {}
+    if not isinstance(scoring_cfg, dict):
+        scoring_cfg = {}
+    best_of = int(scoring_cfg.get("best_of") or 5)
+    if best_of < 1:
+        best_of = 1
+    generation_cfg_effective = dict(generation_cfg)
+    num_return_sequences = int(generation_cfg_effective.get("num_return_sequences") or 1)
+    if num_return_sequences < best_of:
+        generation_cfg_effective["num_return_sequences"] = best_of
+
     if args.dry_run:
         _eprint(f"[dry-run] tasks={len(tasks)} csv_path={csv_path}")
         for task in tasks[:3]:
@@ -1241,6 +1252,10 @@ def main() -> int:
             return float(v)
         return None
 
+    def _score_for_selection(metrics: dict[str, Any]) -> float:
+        v = _pick_primary_metric(metrics, "score_mean")
+        return float(v) if isinstance(v, (int, float)) else float("-inf")
+
     allowed_blocks_agent1 = [block_even, block_odd]
     allowed_blocks_agent2 = [block_agent2]
     write_record, close_writer = _open_output_writer(output_path)
@@ -1291,18 +1306,25 @@ def main() -> int:
                 if args.verbose:
                     _eprint(f"[{idx}/{len(tasks)}] {task.task_id} generating...")
                 t0 = time.time()
-                if args.stream_llm_output and int(generation_cfg.get("num_return_sequences") or 1) != 1:
+                if args.stream_llm_output and int(generation_cfg_effective.get("num_return_sequences") or 1) != 1:
                     _eprint("--stream-llm-output only supports num_return_sequences=1; disabling streaming.")
                     stream_output = False
                 else:
                     stream_output = bool(args.stream_llm_output)
                 if stream_output:
                     _eprint(f"--- streaming LLM output task_id={task.task_id} ---")
-                outputs = _generate_with_transformers(loaded, prompt_text, generation_cfg, stream_output=stream_output)
+                outputs = _generate_with_transformers(
+                    loaded,
+                    prompt_text,
+                    generation_cfg_effective,
+                    stream_output=stream_output,
+                )
                 dt = time.time() - t0
                 if args.verbose:
                     _eprint(f"[{idx}/{len(tasks)}] {task.task_id} generated samples={len(outputs)} dt={dt:.2f}s")
 
+                best_metrics: dict[str, Any] | None = None
+                best_score = float("-inf")
                 for sample_id, output_text in enumerate(outputs):
                     if args.print_llm_output:
                         max_chars = int(args.print_llm_output_max_chars or 0)
@@ -1398,6 +1420,11 @@ def main() -> int:
                         except Exception as e:
                             metrics.update({"mc_error": str(e)})
 
+                    score_val = _score_for_selection(metrics)
+                    if score_val > best_score:
+                        best_score = score_val
+                        best_metrics = dict(metrics)
+
                     record: dict[str, Any] = {
                         "run_name": run_name,
                         "task_id": task.task_id,
@@ -1409,7 +1436,7 @@ def main() -> int:
                             "backend": backend,
                             "model_id": loaded.model_id,
                         },
-                        "generation": generation_cfg,
+                        "generation": generation_cfg_effective,
                         "metrics": metrics,
                         "output_text": output_text,
                         "commands": accepted_cmds,
@@ -1435,17 +1462,19 @@ def main() -> int:
                         }
 
                     write_record(record)
-                    write_simple_record(
-                        {
-                            "task_id": task.task_id,
-                            "string": task.text,
-                            "difficulty": task.difficulty,
-                            "model_id": loaded.model_id,
-                            "score_shape_overlap": _pick_primary_metric(metrics, "score_shape_overlap"),
-                            "score_components": _pick_primary_metric(metrics, "score_components"),
-                            "score_material_adjacent": _pick_primary_metric(metrics, "score_material_adjacent"),
-                        }
-                    )
+                if best_metrics is None:
+                    best_metrics = {}
+                write_simple_record(
+                    {
+                        "task_id": task.task_id,
+                        "string": task.text,
+                        "difficulty": task.difficulty,
+                        "model_id": loaded.model_id,
+                        "score_shape_overlap": _pick_primary_metric(best_metrics, "score_shape_overlap"),
+                        "score_components": _pick_primary_metric(best_metrics, "score_components"),
+                        "score_material_adjacent": _pick_primary_metric(best_metrics, "score_material_adjacent"),
+                    }
+                )
                 _eprint(f"[{idx}/{len(tasks)}] {task.task_id} samples={len(outputs)} {dt:.2f}s")
             else:
                 user_prompt_1 = user_template_agent1.format(
@@ -1507,14 +1536,19 @@ def main() -> int:
                 if args.verbose:
                     _eprint(f"[{idx}/{len(tasks)}] {task.task_id} generating agent1...")
                 t0 = time.time()
-                if args.stream_llm_output and int(generation_cfg.get("num_return_sequences") or 1) != 1:
+                if args.stream_llm_output and int(generation_cfg_effective.get("num_return_sequences") or 1) != 1:
                     _eprint("--stream-llm-output only supports num_return_sequences=1; disabling streaming.")
                     stream_output = False
                 else:
                     stream_output = bool(args.stream_llm_output)
                 if stream_output:
                     _eprint(f"--- streaming LLM output task_id={task.task_id} agent=1 ---")
-                outputs_1 = _generate_with_transformers(loaded, prompt_text_1, generation_cfg, stream_output=stream_output)
+                outputs_1 = _generate_with_transformers(
+                    loaded,
+                    prompt_text_1,
+                    generation_cfg_effective,
+                    stream_output=stream_output,
+                )
                 dt1 = time.time() - t0
 
                 if args.verbose:
@@ -1522,7 +1556,12 @@ def main() -> int:
                 t1 = time.time()
                 if stream_output:
                     _eprint(f"--- streaming LLM output task_id={task.task_id} agent=2 ---")
-                outputs_2 = _generate_with_transformers(loaded, prompt_text_2, generation_cfg, stream_output=stream_output)
+                outputs_2 = _generate_with_transformers(
+                    loaded,
+                    prompt_text_2,
+                    generation_cfg_effective,
+                    stream_output=stream_output,
+                )
                 dt2 = time.time() - t1
                 dt = dt1 + dt2
 
@@ -1530,6 +1569,8 @@ def main() -> int:
                 if args.verbose:
                     _eprint(f"[{idx}/{len(tasks)}] {task.task_id} generated samples={n} dt={dt:.2f}s")
 
+                best_metrics: dict[str, Any] | None = None
+                best_score = float("-inf")
                 for sample_id in range(n):
                     output_text_1 = outputs_1[sample_id]
                     output_text_2 = outputs_2[sample_id]
@@ -1653,6 +1694,11 @@ def main() -> int:
                         except Exception as e:
                             metrics.update({"mc_error": str(e)})
 
+                    score_val = _score_for_selection(metrics)
+                    if score_val > best_score:
+                        best_score = score_val
+                        best_metrics = dict(metrics)
+
                     record: dict[str, Any] = {
                         "run_name": run_name,
                         "task_id": task.task_id,
@@ -1664,7 +1710,7 @@ def main() -> int:
                             "backend": backend,
                             "model_id": loaded.model_id,
                         },
-                        "generation": generation_cfg,
+                        "generation": generation_cfg_effective,
                         "metrics": metrics,
                         "output_text": output_text,
                         "agents": [
@@ -1718,17 +1764,19 @@ def main() -> int:
                         }
 
                     write_record(record)
-                    write_simple_record(
-                        {
-                            "task_id": task.task_id,
-                            "string": task.text,
-                            "difficulty": task.difficulty,
-                            "model_id": loaded.model_id,
-                            "score_shape_overlap": _pick_primary_metric(metrics, "score_shape_overlap"),
-                            "score_components": _pick_primary_metric(metrics, "score_components"),
-                            "score_material_adjacent": _pick_primary_metric(metrics, "score_material_adjacent"),
-                        }
-                    )
+                if best_metrics is None:
+                    best_metrics = {}
+                write_simple_record(
+                    {
+                        "task_id": task.task_id,
+                        "string": task.text,
+                        "difficulty": task.difficulty,
+                        "model_id": loaded.model_id,
+                        "score_shape_overlap": _pick_primary_metric(best_metrics, "score_shape_overlap"),
+                        "score_components": _pick_primary_metric(best_metrics, "score_components"),
+                        "score_material_adjacent": _pick_primary_metric(best_metrics, "score_material_adjacent"),
+                    }
+                )
                 _eprint(f"[{idx}/{len(tasks)}] {task.task_id} samples={n} {dt:.2f}s")
 
     finally:
