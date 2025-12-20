@@ -5,8 +5,7 @@ from typing import Any, Dict, List, Optional
 from LLM_Collab_MC.utils.str_builder import (
     TaskSpec,
     extract_command_lines,
-    render_progress_overlay_ascii,
-    render_target_ascii,
+    normalize_block_id,
     simulate_commands_to_scan_blocks,
     validate_and_normalize_mc_commands,
 )
@@ -81,24 +80,58 @@ def format_followup_prompts(
         target_rows_topdown=target_rows_topdown,
     )
 
-    target_ascii = render_target_ascii(task)
-    progress_ascii = render_progress_overlay_ascii(task, blocks, empty_char=".", missing_target_char="#")
+    height = len(target_rows_topdown)
+    width = len(target_rows_topdown[0]) if height else 0
+
+    target_set = set()
+    for r, row in enumerate(target_rows_topdown):
+        if len(row) != width:
+            raise ValueError("target_rows_topdown has inconsistent row widths")
+        for x, ch in enumerate(row):
+            if ch != "#":
+                continue
+            wx = local_bbox_from[0] + x
+            wy = local_bbox_from[1] + (height - 1 - r)
+            wz = local_bbox_from[2]
+            target_set.add((int(wx), int(wy), int(wz)))
+
+    def _is_air(name: str | None) -> bool:
+        if name is None:
+            return True
+        b = normalize_block_id(str(name))
+        return b in {"air", "cave_air", "void_air"}
+
+    placed_set = set()
+    for b in blocks:
+        pos = b.get("pos")
+        name = b.get("name")
+        if not (isinstance(pos, list) and len(pos) == 3):
+            continue
+        if _is_air(None if name is None else str(name)):
+            continue
+        placed_set.add((int(pos[0]), int(pos[1]), int(pos[2])))
+
+    to_place = sorted(target_set - placed_set, key=lambda p: (-p[1], p[0], p[2]))
+    to_remove = sorted(placed_set - target_set, key=lambda p: (-p[1], p[0], p[2]))
+
+    def _format_positions(points: list[tuple[int, int, int]]) -> str:
+        if not points:
+            return "- (none)"
+        return "\n".join(f"- {x} {y} {z}" for x, y, z in points)
 
     feedback = "\n".join(
         [
-            "Feedback (ASCII maps):",
+            "Feedback (coordinate edits):",
             f"- Turn: {turn_number}",
-            "- Target mask: '.' empty, '#' should place a block (should be allowed type).",
-            "- For target '.' positions, you should place air.",
-            "- Current progress: '.' empty, '#' missing target, letters = first letter of the placed block color.",
+            "- Coordinates are absolute (x y z).",
             "- Deletion is allowed: use /setblock ... air or /fill ... air to remove blocks.",
             "- Do not output ASCII; output commands only.",
             "",
-            "Target mask:",
-            target_ascii,
+            "Place a block (any allowed type) at:",
+            _format_positions(to_place),
             "",
-            "Current progress:",
-            progress_ascii,
+            "Delete (place air) at:",
+            _format_positions(to_remove),
         ]
     ).rstrip()
 

@@ -53,6 +53,7 @@ prompt:
     Constraints:
     - Output ONLY Minecraft commands, one per line.
     - Allowed commands: /setblock, /fill
+    - Deletion is allowed: use /setblock ... air or /fill ... air to remove blocks.
     - Use absolute integer coordinates only (no ~).
     - Build ONLY the letters. Do NOT build a background/canvas.
     - Every coordinate must be within the bbox.
@@ -81,6 +82,7 @@ prompt:
     Constraints:
     - Output ONLY Minecraft commands, one per line.
     - Allowed commands: /setblock, /fill
+    - Deletion is allowed: use /setblock ... air or /fill ... air to remove blocks.
     - Use absolute integer coordinates only (no ~).
     - Build ONLY the letters. Do NOT build a background/canvas.
     - Every coordinate must be within the bbox.
@@ -108,6 +110,7 @@ prompt:
     Constraints:
     - Output ONLY Minecraft commands, one per line.
     - Allowed commands: /setblock, /fill
+    - Deletion is allowed: use /setblock ... air or /fill ... air to remove blocks.
     - Use absolute integer coordinates only (no ~).
     - Build ONLY the letters. Do NOT build a background/canvas.
     - Every coordinate must be within the bbox.
