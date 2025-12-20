@@ -43,6 +43,42 @@ def _resolve_path(config_path: Path, value: str | None) -> Path | None:
     return (config_path.parent / path).resolve()
 
 
+_TEMPLATE_RE = re.compile(r"\$\{([A-Za-z0-9_.-]+)\}")
+
+
+def _slugify(value: str) -> str:
+    slug = re.sub(r"[^A-Za-z0-9]+", "_", value).strip("_").lower()
+    return slug or "model"
+
+
+def _build_template_context(model_name_or_path: str) -> dict[str, str]:
+    base = Path(model_name_or_path).name
+    return {
+        "model_name_or_path": model_name_or_path,
+        "model_basename": base,
+        "model_slug": _slugify(base),
+        "model_slug_full": _slugify(model_name_or_path),
+    }
+
+
+def _expand_templates(value: str, context: dict[str, str]) -> str:
+    def repl(match: re.Match[str]) -> str:
+        key = match.group(1)
+        if key not in context:
+            raise ValueError(f"Unknown template key: {key}")
+        return context[key]
+
+    return _TEMPLATE_RE.sub(repl, value)
+
+
+def _maybe_expand_templates(value: str, context: dict[str, str]) -> str:
+    if "${" not in value:
+        return value
+    if not context:
+        raise ValueError("Template placeholders require model.model_name_or_path to be set")
+    return _expand_templates(value, context)
+
+
 def _render_prompt(
     *,
     tokenizer: Any,
@@ -902,7 +938,16 @@ def main() -> int:
     config_path = Path(args.config).expanduser().resolve()
     cfg = _load_yaml(config_path)
 
+    model_cfg = cfg.get("model") or {}
+    if not isinstance(model_cfg, dict):
+        raise ValueError("model must be a mapping")
+    model_name_or_path = model_cfg.get("model_name_or_path")
+    template_context: dict[str, str] = {}
+    if isinstance(model_name_or_path, str) and model_name_or_path:
+        template_context = _build_template_context(model_name_or_path)
+
     run_name = str(cfg.get("run_name") or "baseline")
+    run_name = _maybe_expand_templates(run_name, template_context)
     seed = int(cfg.get("seed") or 0)
 
     agents_cfg = cfg.get("agents") or {}
@@ -939,9 +984,15 @@ def main() -> int:
     output_cfg = cfg.get("output") or {}
     if not isinstance(output_cfg, dict):
         raise ValueError("output must be a mapping")
-    output_path = _resolve_path(config_path, output_cfg.get("path")) or (config_path.parent / "outputs/output.jsonl")
+    output_path_value = output_cfg.get("path")
+    if isinstance(output_path_value, str):
+        output_path_value = _maybe_expand_templates(output_path_value, template_context)
+    output_path = _resolve_path(config_path, output_path_value) or (config_path.parent / "outputs/output.jsonl")
     output_path = output_path.resolve()
-    output_simple_path = _resolve_path(config_path, output_cfg.get("simple_path"))
+    output_simple_value = output_cfg.get("simple_path")
+    if isinstance(output_simple_value, str):
+        output_simple_value = _maybe_expand_templates(output_simple_value, template_context)
+    output_simple_path = _resolve_path(config_path, output_simple_value)
     if output_simple_path is None:
         output_simple_path = output_path.with_name(output_path.stem + ".simple.jsonl")
     output_simple_path = output_simple_path.resolve()
@@ -1057,10 +1108,6 @@ def main() -> int:
                 f"[agent1]\n{user_prompt_1}\n\n[agent2]\n{user_prompt_2}\n"
             )
         return 0
-
-    model_cfg = cfg.get("model") or {}
-    if not isinstance(model_cfg, dict):
-        raise ValueError("model must be a mapping")
 
     backend = str(model_cfg.get("backend") or "transformers").lower().strip()
     if backend != "transformers":

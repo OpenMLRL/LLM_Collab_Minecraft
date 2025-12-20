@@ -1,4 +1,5 @@
-run_name: qwen3_4b_str_builder
+# Templates from model.model_name_or_path: model_name_or_path, model_basename, model_slug, model_slug_full.
+run_name: ${model_slug}_str_builder
 seed: 42
 
 agents:
@@ -24,7 +25,7 @@ task:
 
 output:
   # Path is resolved relative to this config file.
-  path: outputs/qwen3_4b_str_builder_eval.jsonl
+  path: outputs/${model_slug}_str_builder_eval.jsonl
   # Optional; if null/omitted, defaults to `{path.stem}.simple.jsonl` next to `path`.
   simple_path: null
   overwrite: false
@@ -33,7 +34,7 @@ output:
 
 model:
   backend: transformers
-  model_name_or_path: Qwen/Qwen3-4B-Instruct-2507
+  model_name_or_path: Qwen/Qwen3-7B
   tokenizer_name_or_path: null
   trust_remote_code: true
   revision: null

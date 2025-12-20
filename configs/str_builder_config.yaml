@@ -10,7 +10,7 @@ collab:
 
 data:
   # Path is resolved relative to this config file.
-  csv_path: ../dataset/str_builder/data3.csv
+  csv_path: ../dataset/str_builder/data4_easy.csv
   split_ratio: 0.8
   spacing: 1
   local_z: 0
