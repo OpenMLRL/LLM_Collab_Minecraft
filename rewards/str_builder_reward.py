@@ -218,8 +218,8 @@ def get_reward_function(*, cfg: Dict[str, Any], num_agents: int) -> Callable[...
             blocks = simulate_commands_to_scan_blocks(commands=accepted, world_bbox_from=world_bbox_from, world_bbox_to=world_bbox_to)
             metrics = score_str_builder(task=task, world_origin=[0, 0, 0], world_scan_blocks=blocks, chamfer_sigma=chamfer_sigma)
             reward = _reward_from_metrics(metrics)
-            if _coverage_ratio(metrics) < 0.35 or _non_target_fill_ratio(task, metrics) > 0.40:
-                reward = 0.0
+            if _coverage_ratio(metrics) < 0.25 or _non_target_fill_ratio(task, metrics) > 0.50:
+                reward = -1.0
             _maybe_debug_print(task=task, reward=reward, metrics=metrics, blocks=blocks, turn_idx=turn_idx)
             return [reward]
 
