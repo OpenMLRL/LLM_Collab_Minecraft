@@ -14,8 +14,8 @@ task:
   # 5x5 block font with 1-column spacing between letters.
   spacing: 1
   local_z: 0
-  # Two block types the agent may use.
-  block_even: white_concrete
+  # Single block type the agent may use.
+  block_even: black_concrete
   block_odd: black_concrete
   # Agent2 block (num_agents=2).
   block_agent2: red_concrete
@@ -87,7 +87,7 @@ prompt:
     - y increases from min_y to max_y (bottom to top).
     - z is constant (min_z == max_z).
 
-    Available blocks (use ONLY these two):
+    Available blocks (use ONLY these):
     - {block_even}
     - {block_odd}
 
@@ -96,7 +96,6 @@ prompt:
     - Allowed commands: /setblock, /fill
     - Use absolute integer coordinates only (no ~).
     - Build ONLY the letters. Do NOT build a background/canvas.
-    - Adjacent constraint: any two 4-neighbor adjacent blocks you place must have different block types.
     - Every coordinate must be within the bbox.
 
   # Optional overrides used when agents.num_agents=2.
@@ -117,7 +116,7 @@ prompt:
     - y increases from min_y to max_y (bottom to top).
     - z is constant (min_z == max_z).
 
-    Available blocks (use ONLY these two):
+    Available blocks (use ONLY these):
     - {block_even}
     - {block_odd}
 
@@ -126,7 +125,6 @@ prompt:
     - Allowed commands: /setblock, /fill
     - Use absolute integer coordinates only (no ~).
     - Build ONLY the letters. Do NOT build a background/canvas.
-    - Team constraint: in the final build, any two 4-neighbor adjacent blocks must have different block types.
     - Every coordinate must be within the bbox.
 
   user_template_agent2: |
@@ -154,5 +152,4 @@ prompt:
     - Allowed commands: /setblock, /fill
     - Use absolute integer coordinates only (no ~).
     - Build ONLY the letters. Do NOT build a background/canvas.
-    - Team constraint: in the final build, any two 4-neighbor adjacent blocks must have different block types.
     - Every coordinate must be within the bbox.

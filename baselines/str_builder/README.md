@@ -2,7 +2,7 @@
 
 `baselines/str_builder/main.py` reads tasks from `../../dataset/str_builder/data.csv`, prompts an LLM once per task to output **Minecraft command lines** (one command per line), then scores the final build result and writes an eval JSON/JSONL file.
 
-The task: given an uppercase string (e.g. `ICML`), build its 5x7 block-letter mask on a constrained 2D plane. Only the letters should be built (no background), and adjacent (4-neighbor) blocks should use different materials.
+The task: given an uppercase string (e.g. `ICML`), build its 5x5 block-letter mask on a constrained 2D plane. Only the letters should be built (no background).
 
 ## Prereqs
 
@@ -35,7 +35,7 @@ This baseline writes **two** JSONL files per run:
 - Main output: `output.path` from `baselines/str_builder/config.yaml`
 - Simplified output: `output.simple_path` (optional); defaults to `{output.path.stem}.simple.jsonl`
 
-The simplified JSONL keeps only: `task_id/string/difficulty`, `model_id`, and the 3 scores (`score_shape_overlap`, `score_components`, `score_material_adjacent`).
+The simplified JSONL keeps only: `task_id/string/difficulty`, `model_id`, and the 2 scores (`score_shape_overlap`, `score_components`).
 
 ## Multi-agent (num_agents=2)
 
@@ -49,9 +49,8 @@ Set `agents.num_agents: 2` in `baselines/str_builder/config.yaml` to run two age
 
 Each record writes:
 
-- `metrics.score_shape_overlap`: `0.5 * exp(-CD/sigma) + 0.5 * IoU`
+- `metrics.score_shape_overlap`: `IoU`
 - `metrics.score_components`: `min(num_8cc / len(string), 1)`
-- `metrics.score_material_adjacent`: `(diff_material_4pairs / total_4pairs)`
-- `metrics.score_mean`: mean of the three scores above
+- `metrics.score_mean`: mean of the two scores above
 
 If Minecraft execution is enabled and scan succeeds, the same metrics are also written with `mc_` prefixes.

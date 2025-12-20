@@ -34,7 +34,7 @@ def _task_from_batch_item(item: Mapping[str, Any]) -> TaskSpec:
 def get_reward_function(*, cfg: Dict[str, Any], num_agents: int) -> Callable[..., List[float]]:
     """Return a CoMLRL reward function for str_builder.
 
-    Reward = score_shape_overlap + score_components + score_material_adjacent (range ~[0, 3]).
+    Reward = score_shape_overlap + score_components (range ~[-1, 2]).
     """
     task_cfg = cfg.get("task") or {}
     if not isinstance(task_cfg, dict):
@@ -74,9 +74,7 @@ def get_reward_function(*, cfg: Dict[str, Any], num_agents: int) -> Callable[...
 
     def _reward_from_metrics(metrics: Mapping[str, Any]) -> float:
         try:
-            return float(metrics.get("score_shape_overlap", 0.0)) + float(metrics.get("score_components", 0.0)) + float(
-                metrics.get("score_material_adjacent", 0.0)
-            )
+            return float(metrics.get("score_shape_overlap", 0.0)) + float(metrics.get("score_components", 0.0))
         except Exception:
             return 0.0
 
@@ -190,8 +188,7 @@ def get_reward_function(*, cfg: Dict[str, Any], num_agents: int) -> Callable[...
             f"[str_builder debug] {task.task_id} text={task.text!r} diff={task.difficulty}{turn_str} "
             f"reward={reward:.4f} "
             f"s1={float(metrics.get('score_shape_overlap', 0.0)):.3f} "
-            f"s2={float(metrics.get('score_components', 0.0)):.3f} "
-            f"s3={float(metrics.get('score_material_adjacent', 0.0)):.3f}"
+            f"s2={float(metrics.get('score_components', 0.0)):.3f}"
         )
         print(prefix, flush=True)
         print(_render_overlay_ascii(task, blocks), flush=True)

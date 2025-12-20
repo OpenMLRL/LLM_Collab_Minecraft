@@ -670,20 +670,7 @@ def _score_str_builder(
     components_ratio = (components / expected) if expected else 0.0
     score_components = min(components_ratio, 1.0) if expected else 0.0
 
-    # Adjacent (4-neighbor) material difference ratio on observed blocks.
-    total_pairs = 0
-    diff_pairs = 0
-    for x, y in o_set:
-        for nx, ny in ((x + 1, y), (x, y + 1)):
-            if (nx, ny) not in o_set:
-                continue
-            total_pairs += 1
-            if obs_block.get((x, y)) != obs_block.get((nx, ny)):
-                diff_pairs += 1
-    adj_diff_ratio = (diff_pairs / total_pairs) if total_pairs else 0.0
-    adj_all_different = bool(total_pairs > 0 and diff_pairs == total_pairs)
-
-    score_mean = (score_shape_overlap + score_components + adj_diff_ratio) / 3.0
+    score_mean = (score_shape_overlap + score_components) / 2.0
 
     return {
         "target_blocks": len(t_set),
@@ -696,11 +683,6 @@ def _score_str_builder(
         "expected_components": expected,
         "components_ratio": components_ratio,
         "score_components": score_components,
-        "adjacent_pairs_4": total_pairs,
-        "adjacent_pairs_4_diff_material": diff_pairs,
-        "adjacent_diff_ratio": adj_diff_ratio,
-        "adjacent_all_different": adj_all_different,
-        "score_material_adjacent": adj_diff_ratio,
         "score_mean": score_mean,
     }
 
@@ -1472,7 +1454,6 @@ def main() -> int:
                         "model_id": loaded.model_id,
                         "score_shape_overlap": _pick_primary_metric(best_metrics, "score_shape_overlap"),
                         "score_components": _pick_primary_metric(best_metrics, "score_components"),
-                        "score_material_adjacent": _pick_primary_metric(best_metrics, "score_material_adjacent"),
                     }
                 )
                 _eprint(f"[{idx}/{len(tasks)}] {task.task_id} samples={len(outputs)} {dt:.2f}s")
@@ -1774,7 +1755,6 @@ def main() -> int:
                         "model_id": loaded.model_id,
                         "score_shape_overlap": _pick_primary_metric(best_metrics, "score_shape_overlap"),
                         "score_components": _pick_primary_metric(best_metrics, "score_components"),
-                        "score_material_adjacent": _pick_primary_metric(best_metrics, "score_material_adjacent"),
                     }
                 )
                 _eprint(f"[{idx}/{len(tasks)}] {task.task_id} samples={n} {dt:.2f}s")

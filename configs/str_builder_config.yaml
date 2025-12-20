@@ -17,7 +17,7 @@ data:
 
 task:
   # Allowed blocks for agent1 (and single-agent).
-  block_agent1: [white_concrete, black_concrete]
+  block_agent1: [black_concrete]
   # Allowed blocks for agent2 (only used when collab.num_agents=2).
   block_agent2: [red_concrete]
   # Cap accepted commands per agent (extra commands are rejected for reward).
@@ -55,7 +55,6 @@ prompt:
     - Allowed commands: /setblock, /fill
     - Use absolute integer coordinates only (no ~).
     - Build ONLY the letters. Do NOT build a background/canvas.
-    - Adjacent constraint: any two 4-neighbor adjacent blocks you place must have different block types.
     - Every coordinate must be within the bbox.
 
   # Optional overrides used when collab.num_agents=2.
@@ -84,7 +83,6 @@ prompt:
     - Allowed commands: /setblock, /fill
     - Use absolute integer coordinates only (no ~).
     - Build ONLY the letters. Do NOT build a background/canvas.
-    - Team constraint: in the final build, any two 4-neighbor adjacent blocks must have different block types.
     - Every coordinate must be within the bbox.
 
   user_template_agent2: |
@@ -112,7 +110,6 @@ prompt:
     - Allowed commands: /setblock, /fill
     - Use absolute integer coordinates only (no ~).
     - Build ONLY the letters. Do NOT build a background/canvas.
-    - Team constraint: in the final build, any two 4-neighbor adjacent blocks must have different block types.
     - Every coordinate must be within the bbox.
 
 external:
@@ -140,10 +137,10 @@ trainer:
   output_dir: TODO
   num_train_epochs: 20
   per_device_train_batch_size: 1
-  learning_rate: 3e-5
+  learning_rate: 1.2e-5
   logging_steps: 20
   save_steps: 200
-  num_generations: 3
+  num_generations: 4
   max_new_tokens: 1024
   temperature: 0.2
   top_p: 0.95
