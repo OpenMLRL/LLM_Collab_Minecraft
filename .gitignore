@@ -15,3 +15,6 @@ baselines/**/config.mc*.yaml
 str_builder/scripts/**/*.sh
 !str_builder/scripts/**/*.example.sh
 str_builder/scripts/**/*.out
+str_painter/scripts/**/*.sh
+!str_painter/scripts/**/*.example.sh
+str_painter/scripts/**/*.out
