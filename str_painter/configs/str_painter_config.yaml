@@ -6,7 +6,7 @@ seed: 42
 
 collab:
   # Set to 1 for single-agent.
-  num_agents: 2
+  num_agents: 1
 
 data:
   # Path is resolved relative to this config file.
@@ -29,7 +29,7 @@ prompt:
     Output ONLY the ASCII grid (no markdown, no code fences, no extra text).
 
   hints:
-    enabled: true
+    enabled: false
 
   # Single-agent prompt.
   user_template: |
@@ -98,17 +98,17 @@ model:
 trainer:
   # Set by scripts (supports [jobid] placeholder).
   output_dir: TODO
-  num_train_epochs: 20
+  num_train_epochs: 100
   per_device_train_batch_size: 1
-  learning_rate: 1.2e-5
+  learning_rate: 1e-5
   logging_steps: 20
   save_steps: 200
-  num_generations: 4
-  max_new_tokens: 512
+  num_generations: 2
+  max_new_tokens: 256
   temperature: 0.2
   top_p: 0.95
   # Set >1 to enable multi-turn training with external feedback prompts.
-  num_turns: 1
+  num_turns: 2
   # comlrl MAGRPOConfig.joint_mode: aligned (index-aligned) | cross (Cartesian product)
   joint_mode: aligned
   # normalize_advantage: true

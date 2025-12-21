@@ -11,14 +11,42 @@ from LLM_Collab_MC.str_painter.utils.str_painter import (
 )
 
 
-def _sort_coords(coords: List[tuple[int, int, int]]) -> List[tuple[int, int, int]]:
-    return sorted(coords, key=lambda p: (-p[1], p[0], p[2]))
+def _render_clean_grid(
+    task: TaskSpec,
+    *,
+    state_map: Dict[tuple[int, int, int], str],
+    expected_letter_block: str,
+    expected_bg_block: str | None,
+) -> str:
+    height = len(task.target_rows_topdown)
+    width = len(task.target_rows_topdown[0]) if height else 0
+    letter_coords = set(get_letter_coords(task))
+    background_coords = set(get_background_coords(task))
 
+    lines: List[str] = []
+    for r in range(height):
+        out = []
+        for x in range(width):
+            wx = task.local_bbox_from[0] + x
+            wy = task.local_bbox_from[1] + (height - 1 - r)
+            wz = task.local_bbox_from[2]
+            pos = (int(wx), int(wy), int(wz))
+            expected_symbol = "."
+            expected_block = None
+            if pos in letter_coords:
+                expected_symbol = "B"
+                expected_block = expected_letter_block
+            elif expected_bg_block is not None and pos in background_coords:
+                expected_symbol = "W"
+                expected_block = expected_bg_block
 
-def _format_positions(points: List[tuple[int, int, int]]) -> str:
-    if not points:
-        return "- (none)"
-    return "\n".join(f"- {x} {y} {z}" for x, y, z in points)
+            observed = normalize_block_id(state_map.get(pos, "air"))
+            if expected_block is not None and observed == expected_block:
+                out.append(expected_symbol)
+            else:
+                out.append(".")
+        lines.append("".join(out))
+    return "\n".join(lines)
 
 
 def format_followup_prompts(
@@ -98,14 +126,12 @@ def format_followup_prompts(
 
     state_map = {**decisions_1, **decisions_2}
 
-    letter_coords = set(get_letter_coords(task))
-    background_coords = set(get_background_coords(task))
-
-    missing_letters = _sort_coords([p for p in letter_coords if normalize_block_id(state_map.get(p, "air")) != expected_letter_block])
-
-    missing_bg: List[tuple[int, int, int]] = []
-    if expected_bg_block is not None:
-        missing_bg = _sort_coords([p for p in background_coords if normalize_block_id(state_map.get(p, "air")) != expected_bg_block])
+    clean_grid = _render_clean_grid(
+        task,
+        state_map=state_map,
+        expected_letter_block=expected_letter_block,
+        expected_bg_block=expected_bg_block,
+    )
 
     prompts: List[str] = [""] * n
     for agent_idx in range(n):
@@ -115,28 +141,15 @@ def format_followup_prompts(
             parts.append(system_prompt)
             parts.append("")
 
-        if agent_idx == 0:
-            feedback = "\n".join(
-                [
-                    "Feedback (coordinate hints):",
-                    f"- Turn: {turn_number}",
-                    "- Coordinates are absolute (x y z).",
-                    "- Output ASCII only: use 'B' for black, '.' for no decision.",
-                    "- Fill missing letter coords:",
-                    _format_positions(missing_letters),
-                ]
-            ).rstrip()
-        else:
-            feedback = "\n".join(
-                [
-                    "Feedback (coordinate hints):",
-                    f"- Turn: {turn_number}",
-                    "- Coordinates are absolute (x y z).",
-                    "- Output ASCII only: use 'W' for white, '.' for no decision.",
-                    "- Fill missing background coords:",
-                    _format_positions(missing_bg),
-                ]
-            ).rstrip()
+        feedback = "\n".join(
+            [
+                "Feedback (ASCII grid, extra-filled cells removed):",
+                f"- Turn: {turn_number}",
+                "- Output ASCII only.",
+                "Grid:",
+                clean_grid,
+            ]
+        ).rstrip()
 
         parts.append(feedback)
 
