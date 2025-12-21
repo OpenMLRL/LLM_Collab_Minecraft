@@ -5,12 +5,9 @@ from typing import Any, Callable, Dict, List, Mapping
 
 from LLM_Collab_MC.str_painter.utils.str_painter import (
     TaskSpec,
-    blocks_to_map,
-    extract_command_lines,
     normalize_block_id,
+    parse_ascii_decisions,
     score_painter_accuracy,
-    simulate_commands_to_scan_blocks,
-    validate_and_normalize_mc_commands,
 )
 
 
@@ -39,8 +36,6 @@ def get_reward_function(*, cfg: Dict[str, Any], num_agents: int) -> Callable[...
     if not isinstance(task_cfg, dict):
         task_cfg = {}
 
-    max_commands_total = _as_int(task_cfg.get("max_commands"), 600)
-
     def _as_block_list(v: Any) -> List[str]:
         if v is None:
             return []
@@ -64,6 +59,10 @@ def get_reward_function(*, cfg: Dict[str, Any], num_agents: int) -> Callable[...
 
     expected_letter_block = normalize_block_id(allowed_blocks_agent1[0])
     expected_bg_block = normalize_block_id(allowed_blocks_agent2[0])
+    symbol_map_agent1 = {"B": expected_letter_block, "b": expected_letter_block}
+    symbol_map_agent2 = {"W": expected_bg_block, "w": expected_bg_block}
+    allowed_symbols_agent1 = {".", *symbol_map_agent1.keys()}
+    allowed_symbols_agent2 = {".", *symbol_map_agent2.keys()}
 
     debug_cfg = cfg.get("debug") or {}
     if not isinstance(debug_cfg, dict):
@@ -117,45 +116,32 @@ def get_reward_function(*, cfg: Dict[str, Any], num_agents: int) -> Callable[...
         print(_render_ascii(task, obs), flush=True)
 
     if num_agents == 1:
-        max_commands_agent1 = max_commands_total
-
         def reward_fn(agent1_completions: List[str], *, batch_items: List[Mapping[str, Any]] | None = None) -> List[float]:
             batch_item = (batch_items or [{}])[0]
             task = _task_from_batch_item(batch_item)
-            world_bbox_from = task.local_bbox_from
-            world_bbox_to = task.local_bbox_to
 
             completion = agent1_completions[0] if agent1_completions else ""
-            lines = extract_command_lines(completion)
-            accepted, _rejected = validate_and_normalize_mc_commands(
-                lines=lines,
-                allowed_blocks=allowed_blocks_agent1,
-                world_bbox_from=world_bbox_from,
-                world_bbox_to=world_bbox_to,
-                max_commands=max_commands_agent1,
+            decisions = parse_ascii_decisions(
+                completion,
+                task=task,
+                symbol_map=symbol_map_agent1,
+                allowed_symbols=allowed_symbols_agent1,
             )
-
-            blocks = simulate_commands_to_scan_blocks(commands=accepted, world_bbox_from=world_bbox_from, world_bbox_to=world_bbox_to)
             metrics = score_painter_accuracy(
                 task=task,
-                blocks=blocks,
+                state=decisions,
                 letter_block=expected_letter_block,
                 background_block=None,
             )
             reward = float(metrics.get("overall_acc", 0.0))
             if debug_enabled:
-                obs = blocks_to_map(blocks)
-                _maybe_debug_print(task, reward, metrics, obs)
+                _maybe_debug_print(task, reward, metrics, decisions)
             return [reward]
 
         return reward_fn
 
     if num_agents != 2:
         raise ValueError("num_agents must be 1 or 2")
-
-    max_commands_per_agent = max(1, max_commands_total // num_agents)
-    max_commands_agent1 = max_commands_per_agent + (max_commands_total % num_agents)
-    max_commands_agent2 = max_commands_per_agent
 
     def reward_fn(
         agent1_completions: List[str],
@@ -165,41 +151,31 @@ def get_reward_function(*, cfg: Dict[str, Any], num_agents: int) -> Callable[...
     ) -> List[float]:
         batch_item = (batch_items or [{}])[0]
         task = _task_from_batch_item(batch_item)
-        world_bbox_from = task.local_bbox_from
-        world_bbox_to = task.local_bbox_to
 
         c1 = agent1_completions[0] if agent1_completions else ""
         c2 = agent2_completions[0] if agent2_completions else ""
-
-        lines_1 = extract_command_lines(c1)
-        lines_2 = extract_command_lines(c2)
-        accepted_1, _rejected_1 = validate_and_normalize_mc_commands(
-            lines=lines_1,
-            allowed_blocks=allowed_blocks_agent1,
-            world_bbox_from=world_bbox_from,
-            world_bbox_to=world_bbox_to,
-            max_commands=max_commands_agent1,
+        decisions_1 = parse_ascii_decisions(
+            c1,
+            task=task,
+            symbol_map=symbol_map_agent1,
+            allowed_symbols=allowed_symbols_agent1,
         )
-        accepted_2, _rejected_2 = validate_and_normalize_mc_commands(
-            lines=lines_2,
-            allowed_blocks=allowed_blocks_agent2,
-            world_bbox_from=world_bbox_from,
-            world_bbox_to=world_bbox_to,
-            max_commands=max_commands_agent2,
+        decisions_2 = parse_ascii_decisions(
+            c2,
+            task=task,
+            symbol_map=symbol_map_agent2,
+            allowed_symbols=allowed_symbols_agent2,
         )
-
-        merged = [*accepted_1, *accepted_2]
-        blocks = simulate_commands_to_scan_blocks(commands=merged, world_bbox_from=world_bbox_from, world_bbox_to=world_bbox_to)
+        merged = {**decisions_1, **decisions_2}
         metrics = score_painter_accuracy(
             task=task,
-            blocks=blocks,
+            state=merged,
             letter_block=expected_letter_block,
             background_block=expected_bg_block,
         )
         reward = float(metrics.get("overall_acc", 0.0))
         if debug_enabled:
-            obs = blocks_to_map(blocks)
-            _maybe_debug_print(task, reward, metrics, obs)
+            _maybe_debug_print(task, reward, metrics, merged)
         return [reward]
 
     return reward_fn

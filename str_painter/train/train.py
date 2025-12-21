@@ -130,13 +130,37 @@ def _build_prompt_payload(
     block_agent1_lines: str,
     block_agent2_lines: str,
     seed: int,
+    hints_enabled: bool,
 ) -> Dict[str, str]:
     w_from = item.get("local_bbox_from") or [0, 0, 0]
     w_to = item.get("local_bbox_to") or [0, 0, 0]
     height = len(item.get("target_rows_topdown") or [])
-    hint_desc, hint_rows = _select_hint_rows(height=height, task_id=str(item.get("task_id") or ""), seed=seed)
-    hint_coords_agent1 = _coords_for_rows(item, hint_rows, want_letters=True)
-    hint_coords_agent2 = _coords_for_rows(item, hint_rows, want_letters=False)
+    hint_section_single = ""
+    hint_section_agent1 = ""
+    hint_section_agent2 = ""
+    if hints_enabled and height > 0:
+        hint_desc, hint_rows = _select_hint_rows(height=height, task_id=str(item.get("task_id") or ""), seed=seed)
+        hint_coords_agent1 = _coords_for_rows(item, hint_rows, want_letters=True)
+        hint_coords_agent2 = _coords_for_rows(item, hint_rows, want_letters=False)
+        hint_section_single = "\n".join(
+            [
+                "Hint (random rows):",
+                f"- Rows shown: {hint_desc}",
+                "- Letter coords to fill in hinted rows:",
+                _format_coords(hint_coords_agent1),
+                "You must also fill letters in non-hinted rows.",
+            ]
+        )
+        hint_section_agent1 = hint_section_single
+        hint_section_agent2 = "\n".join(
+            [
+                "Hint (random rows):",
+                f"- Rows shown: {hint_desc}",
+                "- Background coords to fill in hinted rows:",
+                _format_coords(hint_coords_agent2),
+                "You must also fill background in non-hinted rows.",
+            ]
+        )
 
     fmt_kwargs = {
         "task_id": str(item.get("task_id") or ""),
@@ -146,9 +170,9 @@ def _build_prompt_payload(
         "world_bbox_to": json.dumps(w_to, separators=(",", ":")),
         "block_agent1_lines": block_agent1_lines,
         "block_agent2_lines": block_agent2_lines,
-        "hint_rows_desc": hint_desc,
-        "hint_coords_agent1": _format_coords(hint_coords_agent1),
-        "hint_coords_agent2": _format_coords(hint_coords_agent2),
+        "hint_section_single": hint_section_single,
+        "hint_section_agent1": hint_section_agent1,
+        "hint_section_agent2": hint_section_agent2,
     }
 
     user_single = user_template.format(**fmt_kwargs).rstrip()
@@ -171,6 +195,10 @@ def _build_formatters(cfg: Dict[str, Any], *, num_agents: int, seed: int) -> Lis
     user_template = str(prompt_cfg.get("user_template") or "").rstrip()
     user_template_agent1 = str(prompt_cfg.get("user_template_agent1") or user_template).rstrip()
     user_template_agent2 = str(prompt_cfg.get("user_template_agent2") or user_template).rstrip()
+    hints_cfg = prompt_cfg.get("hints") or {}
+    if not isinstance(hints_cfg, dict):
+        hints_cfg = {}
+    hints_enabled = bool(hints_cfg.get("enabled", True))
 
     task_cfg = cfg.get("task") or {}
     if not isinstance(task_cfg, dict):
@@ -219,6 +247,7 @@ def _build_formatters(cfg: Dict[str, Any], *, num_agents: int, seed: int) -> Lis
             block_agent1_lines=block_agent1_lines,
             block_agent2_lines=block_agent2_lines,
             seed=seed,
+            hints_enabled=hints_enabled,
         )
         if role == "single":
             user = payload["user_prompt_single"]
@@ -362,10 +391,14 @@ def main() -> int:
         dir_val = wandb_cfg.get("dir") or wandb_cfg.get("output_dir")
         if dir_val:
             dir_val = expand_jobid_placeholder(str(dir_val))
+        try:
+            num_turns = int(getattr(magrpo_args, "num_turns", 1))
+        except Exception:
+            num_turns = int((cfg.get("trainer") or {}).get("num_turns") or 1)
         wandb_config = {
             "project": wandb_cfg.get("project", "str_painter"),
             "entity": wandb_cfg.get("entity", None),
-            "name": f"{run_name}_{num_agents}agents",
+            "name": f"{run_name}_{num_agents}agents_{num_turns}t",
             "dir": dir_val,
             "tags": ["str_painter", f"agents_{num_agents}"],
         }
@@ -410,6 +443,10 @@ def main() -> int:
         user_template = str(prompt_cfg.get("user_template") or "").rstrip()
         user_template_agent1 = str(prompt_cfg.get("user_template_agent1") or user_template).rstrip()
         user_template_agent2 = str(prompt_cfg.get("user_template_agent2") or user_template).rstrip()
+        hints_cfg = prompt_cfg.get("hints") or {}
+        if not isinstance(hints_cfg, dict):
+            hints_cfg = {}
+        hints_enabled = bool(hints_cfg.get("enabled", True))
 
         task_cfg = cfg.get("task") or {}
         if not isinstance(task_cfg, dict):
@@ -465,6 +502,7 @@ def main() -> int:
                     block_agent1_lines=block_agent1_lines,
                     block_agent2_lines=block_agent2_lines,
                     seed=seed,
+                    hints_enabled=hints_enabled,
                 )
                 payload = {
                     "system_prompt": system_prompt,

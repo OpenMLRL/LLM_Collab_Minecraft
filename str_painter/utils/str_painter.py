@@ -358,10 +358,50 @@ def blocks_to_map(blocks: List[Dict[str, Any]]) -> Dict[Tuple[int, int, int], st
     return obs
 
 
+def parse_ascii_grid(text: str, *, width: int, height: int, allowed_symbols: set[str] | None = None) -> List[str]:
+    allowed = allowed_symbols or {".", "B", "W", "b", "w"}
+    rows: List[str] = []
+    for raw in (text or "").splitlines():
+        s = "".join(ch for ch in raw.strip() if ch in allowed)
+        if not s:
+            continue
+        s = s[:width].ljust(width, ".")
+        rows.append(s)
+        if len(rows) >= height:
+            break
+    if len(rows) < height:
+        rows.extend(["." * width for _ in range(height - len(rows))])
+    return rows[:height]
+
+
+def parse_ascii_decisions(
+    text: str,
+    *,
+    task: TaskSpec,
+    symbol_map: Dict[str, str],
+    allowed_symbols: set[str] | None = None,
+) -> Dict[Tuple[int, int, int], str]:
+    height = len(task.target_rows_topdown)
+    width = len(task.target_rows_topdown[0]) if height else 0
+    rows = parse_ascii_grid(text, width=width, height=height, allowed_symbols=allowed_symbols)
+    local_from = task.local_bbox_from
+    decisions: Dict[Tuple[int, int, int], str] = {}
+    for r, row in enumerate(rows):
+        for x, ch in enumerate(row):
+            block = symbol_map.get(ch)
+            if not block:
+                continue
+            wx = int(local_from[0]) + x
+            wy = int(local_from[1]) + (height - 1 - r)
+            wz = int(local_from[2])
+            decisions[(wx, wy, wz)] = normalize_block_id(block)
+    return decisions
+
+
 def score_painter_accuracy(
     *,
     task: TaskSpec,
-    blocks: List[Dict[str, Any]],
+    state: Dict[Tuple[int, int, int], str],
     letter_block: str,
     background_block: str | None,
 ) -> Dict[str, Any]:
@@ -370,24 +410,22 @@ def score_painter_accuracy(
 
     letter_coords = get_letter_coords(task)
     background_coords = get_background_coords(task)
-    obs = blocks_to_map(blocks)
-
     letter_total = len(letter_coords)
     bg_total = len(background_coords)
 
     letter_correct = 0
     for pos in letter_coords:
-        if normalize_block_id(obs.get(pos, "air")) == letter_block:
+        if normalize_block_id(state.get(pos, "air")) == letter_block:
             letter_correct += 1
 
     bg_correct = 0
     if background_block is not None:
         for pos in background_coords:
-            if normalize_block_id(obs.get(pos, "air")) == background_block:
+            if normalize_block_id(state.get(pos, "air")) == background_block:
                 bg_correct += 1
     else:
         for pos in background_coords:
-            if _is_air(obs.get(pos, "air")):
+            if _is_air(state.get(pos, "air")):
                 bg_correct += 1
 
     letter_acc = (letter_correct / letter_total) if letter_total else 0.0

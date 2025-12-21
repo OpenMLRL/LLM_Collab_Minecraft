@@ -4,13 +4,10 @@ from typing import Any, Dict, List, Optional
 
 from LLM_Collab_MC.str_painter.utils.str_painter import (
     TaskSpec,
-    blocks_to_map,
-    extract_command_lines,
     get_background_coords,
     get_letter_coords,
     normalize_block_id,
-    simulate_commands_to_scan_blocks,
-    validate_and_normalize_mc_commands,
+    parse_ascii_decisions,
 )
 
 
@@ -61,34 +58,11 @@ def format_followup_prompts(
 
     allowed_blocks_agent1 = [str(b) for b in (ctx.get("allowed_blocks_agent1") or []) if str(b).strip()]
     allowed_blocks_agent2 = [str(b) for b in (ctx.get("allowed_blocks_agent2") or []) if str(b).strip()]
-    max_commands_total = int(ctx.get("max_commands_total") or 600)
-
-    max_per = max(1, max_commands_total // n)
-    extra = max_commands_total % n
-    max_limits = [max_per] * n
-    max_limits[0] += extra
 
     expected_letter_block = normalize_block_id(allowed_blocks_agent1[0] if allowed_blocks_agent1 else "black_concrete")
     expected_bg_block = None
     if n >= 2:
         expected_bg_block = normalize_block_id(allowed_blocks_agent2[0] if allowed_blocks_agent2 else "white_concrete")
-
-    accepted_all: List[str] = []
-    for agent_idx in range(n):
-        completion = agent_completions[agent_idx] if agent_idx < len(agent_completions) else ""
-        allowed = allowed_blocks_agent1 if agent_idx == 0 else (allowed_blocks_agent2 or allowed_blocks_agent1)
-        lines = extract_command_lines(completion)
-        accepted, _rejected = validate_and_normalize_mc_commands(
-            lines=lines,
-            allowed_blocks=allowed,
-            world_bbox_from=local_bbox_from,
-            world_bbox_to=local_bbox_to,
-            max_commands=max_limits[agent_idx],
-        )
-        accepted_all.extend(accepted)
-
-    blocks = simulate_commands_to_scan_blocks(commands=accepted_all, world_bbox_from=local_bbox_from, world_bbox_to=local_bbox_to)
-    obs_map = blocks_to_map(blocks)
 
     task = TaskSpec(
         task_id=task_id,
@@ -100,15 +74,38 @@ def format_followup_prompts(
         target_rows_topdown=target_rows_topdown,
     )
 
+    symbol_map_agent1 = {"B": expected_letter_block, "b": expected_letter_block}
+    symbol_map_agent2 = {}
+    if expected_bg_block is not None:
+        symbol_map_agent2 = {"W": expected_bg_block, "w": expected_bg_block}
+    allowed_symbols_agent1 = {".", *symbol_map_agent1.keys()}
+    allowed_symbols_agent2 = {".", *symbol_map_agent2.keys()}
+
+    decisions_1 = parse_ascii_decisions(
+        agent_completions[0] if agent_completions else "",
+        task=task,
+        symbol_map=symbol_map_agent1,
+        allowed_symbols=allowed_symbols_agent1,
+    )
+    decisions_2 = {}
+    if n >= 2:
+        decisions_2 = parse_ascii_decisions(
+            agent_completions[1] if len(agent_completions) > 1 else "",
+            task=task,
+            symbol_map=symbol_map_agent2,
+            allowed_symbols=allowed_symbols_agent2,
+        )
+
+    state_map = {**decisions_1, **decisions_2}
+
     letter_coords = set(get_letter_coords(task))
     background_coords = set(get_background_coords(task))
 
-    missing_letters = _sort_coords([p for p in letter_coords if normalize_block_id(obs_map.get(p, "air")) != expected_letter_block])
-    extra_black = _sort_coords([p for p in background_coords if normalize_block_id(obs_map.get(p, "air")) == expected_letter_block])
+    missing_letters = _sort_coords([p for p in letter_coords if normalize_block_id(state_map.get(p, "air")) != expected_letter_block])
 
     missing_bg: List[tuple[int, int, int]] = []
     if expected_bg_block is not None:
-        missing_bg = _sort_coords([p for p in background_coords if normalize_block_id(obs_map.get(p, "air")) != expected_bg_block])
+        missing_bg = _sort_coords([p for p in background_coords if normalize_block_id(state_map.get(p, "air")) != expected_bg_block])
 
     prompts: List[str] = [""] * n
     for agent_idx in range(n):
@@ -121,24 +118,22 @@ def format_followup_prompts(
         if agent_idx == 0:
             feedback = "\n".join(
                 [
-                    "Feedback (coordinate edits):",
+                    "Feedback (coordinate hints):",
                     f"- Turn: {turn_number}",
                     "- Coordinates are absolute (x y z).",
-                    "- Use /setblock or /fill.",
-                    f"- Place {expected_letter_block} at:",
+                    "- Output ASCII only: use 'B' for black, '.' for no decision.",
+                    "- Fill missing letter coords:",
                     _format_positions(missing_letters),
-                    f"- Remove {expected_letter_block} from:",
-                    _format_positions(extra_black),
                 ]
             ).rstrip()
         else:
             feedback = "\n".join(
                 [
-                    "Feedback (coordinate edits):",
+                    "Feedback (coordinate hints):",
                     f"- Turn: {turn_number}",
                     "- Coordinates are absolute (x y z).",
-                    "- Use /setblock or /fill.",
-                    f"- Place {expected_bg_block} at:",
+                    "- Output ASCII only: use 'W' for white, '.' for no decision.",
+                    "- Fill missing background coords:",
                     _format_positions(missing_bg),
                 ]
             ).rstrip()
@@ -152,7 +147,7 @@ def format_followup_prompts(
             prev = agent_completions[agent_idx] if agent_idx < len(agent_completions) else ""
             if prev.strip():
                 parts.append("")
-                parts.append("Your previous commands:")
+                parts.append("Your previous output:")
                 parts.append(prev.strip())
 
         prompts[agent_idx] = "\n".join(parts).strip()

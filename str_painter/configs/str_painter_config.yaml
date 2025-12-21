@@ -6,7 +6,7 @@ seed: 42
 
 collab:
   # Set to 1 for single-agent.
-  num_agents: 1
+  num_agents: 2
 
 data:
   # Path is resolved relative to this config file.
@@ -20,127 +20,67 @@ task:
   block_agent1: [black_concrete]
   # Allowed blocks for agent2 (background).
   block_agent2: [white_concrete]
-  # Cap accepted commands per agent (extra commands are rejected for reward).
+  # Cap accepted decisions per agent (kept for compatibility).
   max_commands: 300
 
 prompt:
   system: |
-    You are a Minecraft building agent.
-    Output must be Minecraft commands only (no markdown, no code fences, no extra text).
+    You are a Minecraft ASCII art assistant.
+    Output ONLY the ASCII grid (no markdown, no code fences, no extra text).
+
+  hints:
+    enabled: true
 
   # Single-agent prompt.
   user_template: |
-    Build the following uppercase string as 5x5 block letters on a 2D plane (z is constant).
+    Draw the uppercase string as 5x5 block letters in an ASCII grid.
 
     String: {text}
     Difficulty: {difficulty}
 
-    WORLD bbox (inclusive):
-    - from: {world_bbox_from}
-    - to:   {world_bbox_to}
+    Grid rules:
+    - Output exactly 5 lines (top to bottom).
+    - Each letter is a 5x5 glyph; put exactly one '.' column between letters.
+    - Use 'B' for black letter blocks; use '.' for no decision.
 
-    Coordinate mapping (absolute coords):
-    - Let (min_x, min_y, min_z) be bbox.from and (max_x, max_y, max_z) be bbox.to.
-    - x increases from min_x to max_x (left to right).
-    - y increases from min_y to max_y (bottom to top).
-    - z is constant (min_z == max_z).
-
-    Available blocks (use ONLY these):
-    {block_agent1_lines}
-
-    Hint (random rows):
-    - Rows shown: {hint_rows_desc}
-    - Letter coords to fill in hinted rows:
-    {hint_coords_agent1}
-
-    You must also fill letters in non-hinted rows.
-
-    Constraints:
-    - Output ONLY Minecraft commands, one per line.
-    - Allowed commands: /setblock, /fill
-    - Deletion is allowed: use /setblock ... air or /fill ... air to remove blocks.
-    - Use absolute integer coordinates only (no ~).
-    - Build ONLY the letters; leave other cells empty.
-    - Every coordinate must be within the bbox.
+    {hint_section_single}
 
   # Optional overrides used when collab.num_agents=2.
   user_template_agent1: |
-    You are Agent 1 (letters). Place ONLY letter blocks using black.
+    You are Agent 1 (letters). Output ONLY the ASCII grid.
 
-    Task: Build the uppercase string as 5x5 block letters on a 2D plane (z is constant).
+    Task: Draw the uppercase string as 5x5 block letters.
     String: {text}
     Difficulty: {difficulty}
 
-    WORLD bbox (inclusive):
-    - from: {world_bbox_from}
-    - to:   {world_bbox_to}
+    Grid rules:
+    - Output exactly 5 lines (top to bottom).
+    - Each letter is a 5x5 glyph; put exactly one '.' column between letters.
+    - Use 'B' for black letter blocks; use '.' for no decision.
 
-    Coordinate mapping (absolute coords):
-    - Let (min_x, min_y, min_z) be bbox.from and (max_x, max_y, max_z) be bbox.to.
-    - x increases from min_x to max_x (left to right).
-    - y increases from min_y to max_y (bottom to top).
-    - z is constant (min_z == max_z).
-
-    Available blocks (use ONLY these):
-    {block_agent1_lines}
-
-    Hint (random rows):
-    - Rows shown: {hint_rows_desc}
-    - Letter coords to fill in hinted rows:
-    {hint_coords_agent1}
-
-    You must also fill letters in non-hinted rows.
-
-    Constraints:
-    - Output ONLY Minecraft commands, one per line.
-    - Allowed commands: /setblock, /fill
-    - Deletion is allowed: use /setblock ... air or /fill ... air to remove blocks.
-    - Use absolute integer coordinates only (no ~).
-    - Build ONLY the letters.
-    - Every coordinate must be within the bbox.
+    {hint_section_agent1}
 
   user_template_agent2: |
-    You are Agent 2 (background). Paint ONLY the background using white blocks.
+    You are Agent 2 (background). Output ONLY the ASCII grid.
 
-    Task: Build the uppercase string as 5x5 block letters on a 2D plane (z is constant).
+    Task: Paint the background (non-letter cells) for the same 5x5 glyph layout.
     String: {text}
     Difficulty: {difficulty}
 
-    WORLD bbox (inclusive):
-    - from: {world_bbox_from}
-    - to:   {world_bbox_to}
+    Grid rules:
+    - Output exactly 5 lines (top to bottom).
+    - Each letter is a 5x5 glyph; put exactly one '.' column between letters.
+    - Use 'W' for white background blocks; use '.' for no decision.
+    - Do NOT paint letter cells.
 
-    Coordinate mapping (absolute coords):
-    - Let (min_x, min_y, min_z) be bbox.from and (max_x, max_y, max_z) be bbox.to.
-    - x increases from min_x to max_x (left to right).
-    - y increases from min_y to max_y (bottom to top).
-    - z is constant (min_z == max_z).
-
-    Available blocks (use ONLY these):
-    {block_agent2_lines}
-
-    Hint (random rows):
-    - Rows shown: {hint_rows_desc}
-    - Background coords to fill in hinted rows:
-    {hint_coords_agent2}
-
-    You must also fill background in non-hinted rows.
-    Agent 2 acts after Agent 1, so do NOT paint letter coords.
-
-    Constraints:
-    - Output ONLY Minecraft commands, one per line.
-    - Allowed commands: /setblock, /fill
-    - Deletion is allowed: use /setblock ... air or /fill ... air to remove blocks.
-    - Use absolute integer coordinates only (no ~).
-    - Build ONLY the background.
-    - Every coordinate must be within the bbox.
+    {hint_section_agent2}
 
 external:
   # Only used when trainer.num_turns > 1.
   mode: draw_feedback
   # Include the original (turn-1) prompt after the feedback.
   original_prompt: true
-  # Optionally include previous commands verbatim (usually keep false).
+  # Optionally include previous outputs verbatim (usually keep false).
   previous_response: false
 
 model:
