@@ -5,6 +5,7 @@ from typing import Any, Callable, Dict, List, Mapping
 
 from LLM_Collab_MC.str_painter.utils.str_painter import (
     TaskSpec,
+    get_background_coords,
     normalize_block_id,
     parse_ascii_decisions,
     score_painter_accuracy,
@@ -97,7 +98,13 @@ def get_reward_function(*, cfg: Dict[str, Any], num_agents: int) -> Callable[...
             lines.append("".join(out))
         return "\n".join(lines)
 
-    def _maybe_debug_print(task: TaskSpec, reward: float, metrics: Mapping[str, Any], obs: Mapping[tuple[int, int, int], str]) -> None:
+    def _maybe_debug_print(
+        task: TaskSpec,
+        reward: float,
+        metrics: Mapping[str, Any],
+        obs: Mapping[tuple[int, int, int], str],
+        turn_idx: int | None,
+    ) -> None:
         if not debug_enabled:
             return
         debug_state["calls"] += 1
@@ -106,11 +113,15 @@ def get_reward_function(*, cfg: Dict[str, Any], num_agents: int) -> Callable[...
         if debug_every_n_calls > 0 and (debug_state["calls"] % debug_every_n_calls) != 0:
             return
         debug_state["printed"] += 1
+        penalty = metrics.get("background_penalty")
+        penalty_str = f" penalty={float(penalty):.3f}" if penalty is not None else ""
+        turn_str = f" turn={int(turn_idx)}" if turn_idx is not None else ""
         prefix = (
-            f"[str_painter debug] {task.task_id} text={task.text!r} "
+            f"[str_painter debug] {task.task_id} text={task.text!r}{turn_str} "
             f"reward={reward:.4f} "
             f"letter_acc={float(metrics.get('letter_acc', 0.0)):.3f} "
             f"bg_acc={float(metrics.get('background_acc', 0.0)):.3f}"
+            f"{penalty_str}"
         )
         print(prefix, flush=True)
         print(_render_ascii(task, obs), flush=True)
@@ -119,6 +130,9 @@ def get_reward_function(*, cfg: Dict[str, Any], num_agents: int) -> Callable[...
         def reward_fn(agent1_completions: List[str], *, batch_items: List[Mapping[str, Any]] | None = None) -> List[float]:
             batch_item = (batch_items or [{}])[0]
             task = _task_from_batch_item(batch_item)
+            turn_idx = None
+            if isinstance(batch_item, Mapping):
+                turn_idx = batch_item.get("_str_painter_turn")
 
             completion = agent1_completions[0] if agent1_completions else ""
             decisions = parse_ascii_decisions(
@@ -133,9 +147,26 @@ def get_reward_function(*, cfg: Dict[str, Any], num_agents: int) -> Callable[...
                 letter_block=expected_letter_block,
                 background_block=None,
             )
-            reward = float(metrics.get("overall_acc", 0.0))
+            background_coords = get_background_coords(task)
+            background_total = len(background_coords)
+            background_filled = 0
+            for pos in background_coords:
+                if normalize_block_id(decisions.get(pos, "air")) == expected_letter_block:
+                    background_filled += 1
+            if background_total > 0:
+                background_penalty = 2.0 * (float(background_filled) ** 2) / float(background_total ** 2)
+            else:
+                background_penalty = 0.0
+
+            reward = float(metrics.get("overall_acc", 0.0)) - background_penalty
+            metrics = {
+                **metrics,
+                "background_total": background_total,
+                "background_filled": background_filled,
+                "background_penalty": background_penalty,
+            }
             if debug_enabled:
-                _maybe_debug_print(task, reward, metrics, decisions)
+                _maybe_debug_print(task, reward, metrics, decisions, turn_idx)
             return [reward]
 
         return reward_fn
@@ -151,6 +182,9 @@ def get_reward_function(*, cfg: Dict[str, Any], num_agents: int) -> Callable[...
     ) -> List[float]:
         batch_item = (batch_items or [{}])[0]
         task = _task_from_batch_item(batch_item)
+        turn_idx = None
+        if isinstance(batch_item, Mapping):
+            turn_idx = batch_item.get("_str_painter_turn")
 
         c1 = agent1_completions[0] if agent1_completions else ""
         c2 = agent2_completions[0] if agent2_completions else ""
@@ -175,7 +209,7 @@ def get_reward_function(*, cfg: Dict[str, Any], num_agents: int) -> Callable[...
         )
         reward = float(metrics.get("overall_acc", 0.0))
         if debug_enabled:
-            _maybe_debug_print(task, reward, metrics, merged)
+            _maybe_debug_print(task, reward, metrics, merged, turn_idx)
         return [reward]
 
     return reward_fn

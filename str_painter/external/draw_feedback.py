@@ -49,6 +49,36 @@ def _render_clean_grid(
     return "\n".join(lines)
 
 
+def _render_state_grid(
+    task: TaskSpec,
+    *,
+    state_map: Dict[tuple[int, int, int], str],
+    expected_letter_block: str,
+    expected_bg_block: str | None,
+) -> str:
+    height = len(task.target_rows_topdown)
+    width = len(task.target_rows_topdown[0]) if height else 0
+    lines: List[str] = []
+    for r in range(height):
+        out = []
+        for x in range(width):
+            wx = task.local_bbox_from[0] + x
+            wy = task.local_bbox_from[1] + (height - 1 - r)
+            wz = task.local_bbox_from[2]
+            pos = (int(wx), int(wy), int(wz))
+            observed = normalize_block_id(state_map.get(pos, "air"))
+            if observed == expected_letter_block:
+                out.append("B")
+            elif expected_bg_block is not None and observed == expected_bg_block:
+                out.append("W")
+            elif observed in ("air", "cave_air", "void_air"):
+                out.append(".")
+            else:
+                out.append("?")
+        lines.append("".join(out))
+    return "\n".join(lines)
+
+
 def format_followup_prompts(
     *,
     ctx: Dict[str, Any],
@@ -126,6 +156,12 @@ def format_followup_prompts(
 
     state_map = {**decisions_1, **decisions_2}
 
+    prev_grid = _render_state_grid(
+        task,
+        state_map=state_map,
+        expected_letter_block=expected_letter_block,
+        expected_bg_block=expected_bg_block,
+    )
     clean_grid = _render_clean_grid(
         task,
         state_map=state_map,
@@ -143,13 +179,18 @@ def format_followup_prompts(
 
         feedback = "\n".join(
             [
-                "Feedback (ASCII grid, extra-filled cells removed):",
+                "Feedback (ASCII grids):",
                 f"- Turn: {turn_number}",
                 "- Output ASCII only.",
-                "Grid:",
+                "- Cleaned grid removes only incorrect extra-filled cells; you must still complete remaining correct cells.",
+                "Previous grid:",
+                prev_grid,
+                "Cleaned grid (extra-filled cells removed):",
                 clean_grid,
             ]
         ).rstrip()
+
+        # print(feedback)
 
         parts.append(feedback)
 
