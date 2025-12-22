@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import random
+import zlib
 from typing import Any, Dict, List, Optional
 
 from LLM_Collab_MC.str_painter.utils.str_painter import (
@@ -18,35 +20,54 @@ def _render_clean_grid(
     expected_letter_block: str,
     expected_bg_block: str | None,
 ) -> str:
+    lines, _missing = _build_clean_grid_and_missing(
+        task,
+        state_map=state_map,
+        expected_letter_block=expected_letter_block,
+        expected_bg_block=expected_bg_block,
+    )
+    return "\n".join(lines)
+
+
+def _build_clean_grid_and_missing(
+    task: TaskSpec,
+    *,
+    state_map: Dict[tuple[int, int, int], str],
+    expected_letter_block: str,
+    expected_bg_block: str | None,
+) -> tuple[List[str], List[tuple[int, int, str]]]:
     height = len(task.target_rows_topdown)
     width = len(task.target_rows_topdown[0]) if height else 0
-    letter_coords = set(get_letter_coords(task))
-    background_coords = set(get_background_coords(task))
 
     lines: List[str] = []
-    for r in range(height):
-        out = []
+    missing: List[tuple[int, int, str]] = []
+    for r, row in enumerate(task.target_rows_topdown):
+        out: List[str] = []
         for x in range(width):
+            ch = row[x] if x < len(row) else "."
+            expected_symbol = None
+            expected_block = None
+            if ch == "#":
+                expected_symbol = "B"
+                expected_block = expected_letter_block
+            elif expected_bg_block is not None:
+                expected_symbol = "W"
+                expected_block = expected_bg_block
+
             wx = task.local_bbox_from[0] + x
             wy = task.local_bbox_from[1] + (height - 1 - r)
             wz = task.local_bbox_from[2]
             pos = (int(wx), int(wy), int(wz))
-            expected_symbol = "."
-            expected_block = None
-            if pos in letter_coords:
-                expected_symbol = "B"
-                expected_block = expected_letter_block
-            elif expected_bg_block is not None and pos in background_coords:
-                expected_symbol = "W"
-                expected_block = expected_bg_block
-
             observed = normalize_block_id(state_map.get(pos, "air"))
+
             if expected_block is not None and observed == expected_block:
-                out.append(expected_symbol)
+                out.append(expected_symbol or ".")
             else:
                 out.append(".")
+                if expected_symbol is not None:
+                    missing.append((r, x, expected_symbol))
         lines.append("".join(out))
-    return "\n".join(lines)
+    return lines, missing
 
 
 def _render_state_grid(
@@ -121,6 +142,7 @@ def format_followup_prompts(
     expected_bg_block = None
     if n >= 2:
         expected_bg_block = normalize_block_id(allowed_blocks_agent2[0] if allowed_blocks_agent2 else "white_concrete")
+    hint2_enabled = bool(ctx.get("hint2_enabled", False))
 
     task = TaskSpec(
         task_id=task_id,
@@ -162,12 +184,24 @@ def format_followup_prompts(
         expected_letter_block=expected_letter_block,
         expected_bg_block=expected_bg_block,
     )
-    clean_grid = _render_clean_grid(
+    clean_lines, missing = _build_clean_grid_and_missing(
         task,
         state_map=state_map,
         expected_letter_block=expected_letter_block,
         expected_bg_block=expected_bg_block,
     )
+    if hint2_enabled and len(missing) > 1:
+        seed_src = f"{task_id}:{turn_number}"
+        seed_val = zlib.crc32(seed_src.encode("utf-8")) & 0xFFFFFFFF
+        rng = random.Random(int(seed_val))
+        k = rng.randint(1, len(missing) - 1)
+        picks = rng.sample(missing, k)
+        mutable = [list(row) for row in clean_lines]
+        for r, x, sym in picks:
+            if 0 <= r < len(mutable) and 0 <= x < len(mutable[r]):
+                mutable[r][x] = sym
+        clean_lines = ["".join(row) for row in mutable]
+    clean_grid = "\n".join(clean_lines)
 
     prompts: List[str] = [""] * n
     for agent_idx in range(n):
@@ -185,7 +219,7 @@ def format_followup_prompts(
                 "- Cleaned grid removes only incorrect extra-filled cells; you must still complete remaining correct cells.",
                 "Previous grid:",
                 prev_grid,
-                "Cleaned grid (extra-filled cells removed):",
+                "Cleaned grid (extra-filled cells removed, plus extra correct hints):",
                 clean_grid,
             ]
         ).rstrip()

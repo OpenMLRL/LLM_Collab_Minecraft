@@ -6,7 +6,7 @@ seed: 42
 
 collab:
   # Set to 1 for single-agent.
-  num_agents: 2
+  num_agents: 1
 
 data:
   # Path is resolved relative to this config file.
@@ -82,6 +82,8 @@ external:
   original_prompt: true
   # Optionally include previous outputs verbatim (usually keep false).
   previous_response: false
+  # Add extra correct hints in the cleaned feedback grid.
+  hint2: true
 
 model:
   name: Qwen/Qwen3-4B-Instruct-2507

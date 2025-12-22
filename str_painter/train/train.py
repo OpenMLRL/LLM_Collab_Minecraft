@@ -416,6 +416,7 @@ def main() -> int:
     external_cfg = cfg.get("external") or {}
     if not isinstance(external_cfg, dict):
         external_cfg = {}
+    hint2_enabled = bool(external_cfg.get("hint2", False))
 
     trainer_kwargs: Dict[str, Any] = {
         "agents": agents,
@@ -518,6 +519,7 @@ def main() -> int:
                     "allowed_blocks_agent1": list(agent1_blocks),
                     "allowed_blocks_agent2": list(agent2_blocks),
                     "max_commands_total": max_commands_total,
+                    "hint2_enabled": hint2_enabled,
                 }
 
                 ds_key = _normalize_key(str(item.get("prompt") or ""))
