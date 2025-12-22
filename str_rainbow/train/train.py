@@ -31,6 +31,7 @@ from LLM_Collab_MC.str_rainbow.external import (
 from LLM_Collab_MC.str_rainbow.rewards.str_rainbow_reward import get_reward_function
 from LLM_Collab_MC.str_rainbow.utils.config import apply_overrides, expand_jobid_placeholder, load_yaml, resolve_path
 from LLM_Collab_MC.str_rainbow.utils.patches import apply_default_patches
+from LLM_Collab_MC.str_rainbow.utils.prompting import apply_prompt_defaults
 from LLM_Collab_MC.str_rainbow.utils.str_rainbow import load_tasks_from_csv
 from LLM_Collab_MC.str_rainbow.utils.trainer_args import get_trainer_args
 
@@ -161,6 +162,7 @@ def main() -> int:
     cfg = load_yaml(args.config)
     if args.override:
         cfg = apply_overrides(cfg, str(args.override))
+    apply_prompt_defaults(cfg)
 
     run_name = str(cfg.get("run_name") or "str_rainbow_grpo")
     seed = int(cfg.get("seed", 42))

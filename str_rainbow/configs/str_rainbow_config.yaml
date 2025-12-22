@@ -23,102 +23,8 @@ task:
   # Cap accepted commands per agent (extra commands are rejected for reward).
   max_commands: 300
 
-prompt:
-  system: |
-    You are a Minecraft building agent.
-    Output must be Minecraft commands only (no markdown, no code fences, no extra text).
-
-  # Single-agent prompt.
-  user_template: |
-    The target is a 5x5 character grid made of '#' and '.'.
-    Output /setblock commands for the '#' positions.
-
-    Target grid (top-down rows):
-    {target_ascii}
-
-    WORLD bbox (inclusive):
-    - from: {world_bbox_from}
-    - to:   {world_bbox_to}
-
-    Coordinate mapping (absolute coords):
-    - Let (min_x, min_y, min_z) be bbox.from and (max_x, max_y, max_z) be bbox.to.
-    - x increases from min_x to max_x (left to right).
-    - y increases from min_y to max_y (bottom to top).
-    - z is constant (min_z == max_z).
-
-    Available blocks (use ONLY these):
-    {block_agent1_lines}
-
-    Constraints:
-    - Output ONLY Minecraft commands, one per line.
-    - Allowed commands: /setblock only.
-    - Use absolute integer coordinates only (no ~).
-    - Place blocks ONLY at '#' positions; leave '.' as air.
-    - Adjacent blocks (sharing a side) must NOT be the same color.
-    - Every coordinate must be within the bbox.
-
-  # Optional overrides used when collab.num_agents=2.
-  user_template_agent1: |
-    You are Agent 1 in a 2-person Minecraft building team. You will place SOME of the blocks for the final build.
-
-    The target is a 5x5 character grid made of '#' and '.'.
-    Output /setblock commands for a subset of '#' positions.
-
-    Target grid (top-down rows):
-    {target_ascii}
-
-    WORLD bbox (inclusive):
-    - from: {world_bbox_from}
-    - to:   {world_bbox_to}
-
-    Coordinate mapping (absolute coords):
-    - Let (min_x, min_y, min_z) be bbox.from and (max_x, max_y, max_z) be bbox.to.
-    - x increases from min_x to max_x (left to right).
-    - y increases from min_y to max_y (bottom to top).
-    - z is constant (min_z == max_z).
-
-    Available blocks (use ONLY these):
-    {block_agent1_lines}
-
-    Constraints:
-    - Output ONLY Minecraft commands, one per line.
-    - Allowed commands: /setblock only.
-    - Use absolute integer coordinates only (no ~).
-    - Place blocks ONLY at '#' positions; leave '.' as air.
-    - Adjacent blocks (sharing a side) must NOT be the same color.
-    - Every coordinate must be within the bbox.
-
-  user_template_agent2: |
-    You are Agent 2 in a 2-person Minecraft building team. You will place SOME of the blocks for the final build.
-    You write after Agent 1, so your /setblock commands overwrite Agent 1's results.
-    Choose a reasonable subset of '#' positions to write.
-
-    The target is a 5x5 character grid made of '#' and '.'.
-    Output /setblock commands for a subset of '#' positions.
-
-    Target grid (top-down rows):
-    {target_ascii}
-
-    WORLD bbox (inclusive):
-    - from: {world_bbox_from}
-    - to:   {world_bbox_to}
-
-    Coordinate mapping (absolute coords):
-    - Let (min_x, min_y, min_z) be bbox.from and (max_x, max_y, max_z) be bbox.to.
-    - x increases from min_x to max_x (left to right).
-    - y increases from min_y to max_y (bottom to top).
-    - z is constant (min_z == max_z).
-
-    Available blocks (use ONLY these):
-    {block_agent2_lines}
-
-    Constraints:
-    - Output ONLY Minecraft commands, one per line.
-    - Allowed commands: /setblock only.
-    - Use absolute integer coordinates only (no ~).
-    - Place blocks ONLY at '#' positions; leave '.' as air.
-    - Adjacent blocks (sharing a side) must NOT be the same color.
-    - Every coordinate must be within the bbox.
+# Prompt templates are defined in utils/prompting.py; override here if needed.
+prompt: {}
 
 external:
   # Only used when trainer.num_turns > 1.
@@ -149,7 +55,7 @@ trainer:
   logging_steps: 20
   save_steps: 200
   num_generations: 4
-  max_new_tokens: 512
+  max_new_tokens: 1024
   temperature: 0.2
   top_p: 0.95
   # Set >1 to enable multi-turn training with external feedback prompts.
