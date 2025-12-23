@@ -12,7 +12,7 @@ data:
   # Path is resolved relative to this config file.
   csv_path: ../../dataset/str_builder/one.csv
   split_ratio: 0.8
-  spacing: 1
+  spacing: 2
   local_z: 0
 
 task:
@@ -58,12 +58,12 @@ trainer:
   learning_rate: 1e-5
   logging_steps: 20
   save_steps: 200
-  num_generations: 3
+  num_generations: 2
   max_new_tokens: 600
   temperature: 0.6
   top_p: 0.95
   # Set >1 to enable multi-turn training with external feedback prompts.
-  num_turns: 1
+  num_turns: 2
   # comlrl MAGRPOConfig.joint_mode: aligned (index-aligned) | cross (Cartesian product)
   joint_mode: aligned
   # normalize_advantage: true
