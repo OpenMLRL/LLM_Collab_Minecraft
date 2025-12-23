@@ -34,6 +34,7 @@ Constraints:
 - Use absolute integer coordinates only (no ~).
 - Place blocks ONLY at '#' positions; leave '.' as air.
 - Every coordinate must be within the bbox.
+Format: /setblock <x> <y> <z> <block>
 """
 
 DEFAULT_USER_TEMPLATE_AGENT1 = """You are Agent 1 in a 2-person Minecraft building team. You will place SOME of the blocks for the final build.
@@ -64,6 +65,7 @@ Constraints:
 - Place blocks ONLY at '#' positions; leave '.' as air.
 - Adjacent blocks (sharing a side) must NOT be the same color.
 - Every coordinate must be within the bbox.
+Format: /setblock <x> <y> <z> <block>
 """
 
 DEFAULT_USER_TEMPLATE_AGENT2 = """You are Agent 2 in a 2-person Minecraft building team. You will place SOME of the blocks for the final build.
@@ -96,6 +98,7 @@ Constraints:
 - Place blocks ONLY at '#' positions; leave '.' as air.
 - Adjacent blocks (sharing a side) must NOT be the same color.
 - Every coordinate must be within the bbox.
+Format: /setblock <x> <y> <z> <block>
 """
 
 DEFAULT_PROMPT_CONFIG = {

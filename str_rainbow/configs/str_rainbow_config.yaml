@@ -6,7 +6,7 @@ seed: 42
 
 collab:
   # GRPO = num_agents=1. (CoMLRL's MAGRPOTrainer supports num_agents>=1.)
-  num_agents: 1
+  num_agents: 2
 
 data:
   # Path is resolved relative to this config file.
@@ -59,8 +59,8 @@ trainer:
   logging_steps: 20
   save_steps: 200
   num_generations: 3
-  max_new_tokens: 700
-  temperature: 0.5
+  max_new_tokens: 600
+  temperature: 0.6
   top_p: 0.95
   # Set >1 to enable multi-turn training with external feedback prompts.
   num_turns: 1
