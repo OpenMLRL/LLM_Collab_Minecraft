@@ -402,6 +402,7 @@ def score_str_rainbow(
     task: TaskSpec,
     world_scan_blocks: List[Dict[str, Any]],
     expected_map: Dict[Tuple[int, int, int], str],
+    allowed_blocks_per_agent: List[List[str]] | None = None,
 ) -> Dict[str, Any]:
     obs_map = blocks_to_map(world_scan_blocks)
     target_positions = set(expected_map.keys())
@@ -455,10 +456,22 @@ def score_str_rainbow(
         adjacent_same_color_pairs / adjacent_color_pairs if adjacent_color_pairs > 0 else 0.0
     )
 
+    missing_agent_palette_count = 0
+    penalty_missing_palette = 0.0
+    if allowed_blocks_per_agent is not None:
+        observed_blocks = {block_id for block_id in obs_map.values() if not _is_air(block_id)}
+        for palette in allowed_blocks_per_agent:
+            normalized_palette = _normalize_palette(palette)
+            if not normalized_palette:
+                normalized_palette = ["white_concrete"]
+            if not set(normalized_palette).issubset(observed_blocks):
+                missing_agent_palette_count += 1
+        penalty_missing_palette = 0.25 * float(missing_agent_palette_count)
+
     score_acc = 2.0 * coverage_ratio
     penalty_extra = 1.5 * extra_ratio
-    penalty_adj = 2.0 * adjacent_same_color_ratio
-    score_total = score_acc - penalty_extra - penalty_adj
+    penalty_adj = 1.0 * adjacent_same_color_ratio
+    score_total = score_acc - penalty_extra - penalty_adj - penalty_missing_palette
 
     return {
         "target_total": target_total,
@@ -474,6 +487,8 @@ def score_str_rainbow(
         "score_acc": score_acc,
         "penalty_extra": penalty_extra,
         "penalty_adj": penalty_adj,
+        "missing_agent_palette_count": missing_agent_palette_count,
+        "penalty_missing_palette": penalty_missing_palette,
         "score_total": score_total,
         "score_mean": score_total,
     }

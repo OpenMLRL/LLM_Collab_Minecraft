@@ -171,7 +171,12 @@ def get_reward_function(*, cfg: Dict[str, Any], num_agents: int) -> Callable[...
                 allowed_blocks_per_agent=allowed_blocks_per_agent,
                 num_agents=num_agents,
             )
-            metrics = score_str_rainbow(task=task, world_scan_blocks=blocks, expected_map=expected_map)
+            metrics = score_str_rainbow(
+                task=task,
+                world_scan_blocks=blocks,
+                expected_map=expected_map,
+                allowed_blocks_per_agent=allowed_blocks_per_agent,
+            )
             reward = float(metrics.get("score_mean", 0.0))
             if debug_enabled:
                 obs_map = {tuple(b["pos"]): normalize_block_id(b.get("name") or "air") for b in blocks}
@@ -235,7 +240,12 @@ def get_reward_function(*, cfg: Dict[str, Any], num_agents: int) -> Callable[...
             allowed_blocks_per_agent=allowed_blocks_per_agent,
             num_agents=num_agents,
         )
-        metrics = score_str_rainbow(task=task, world_scan_blocks=blocks, expected_map=expected_map)
+        metrics = score_str_rainbow(
+            task=task,
+            world_scan_blocks=blocks,
+            expected_map=expected_map,
+            allowed_blocks_per_agent=allowed_blocks_per_agent,
+        )
         reward = float(metrics.get("score_mean", 0.0))
         if debug_enabled:
             obs_map = {tuple(b["pos"]): normalize_block_id(b.get("name") or "air") for b in blocks}

@@ -17,7 +17,7 @@ data:
 
 task:
   # Allowed blocks for agent1 (and single-agent).
-  block_agent1: [black_concrete]
+  block_agent1: [black_concrete, green_concrete]
   # Allowed blocks for agent2 (only used when collab.num_agents=2).
   block_agent2: [white_concrete, red_concrete]
   # Cap accepted commands per agent (extra commands are rejected for reward).
@@ -26,7 +26,7 @@ task:
 # Prompt templates are defined in utils/prompting.py; override here if needed.
 prompt:
   # When false, omit the target ASCII grid from prompts.
-  provide_graph: true
+  provide_graph: false
   # Use tokenizer.apply_chat_template when available.
   use_chat_template: true
 
