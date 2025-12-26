@@ -1,0 +1,158 @@
+# Templates from model.model_name_or_path: model_name_or_path, model_basename, model_slug, model_slug_full.
+run_name: ${model_slug}_box_builder
+seed: 42
+
+agents:
+  # 1 = single agent (current behavior)
+  # 2 = two agents with separate block constraints
+  num_agents: 1
+
+dataset:
+  # Path is resolved relative to this config file.
+  json_path: ../../dataset/box_builder/one.json
+
+task:
+  # Optional: restrict allowed blocks for agents (defaults to dataset palette).
+  block_agent1: []
+  block_agent2: []
+
+output:
+  # Path is resolved relative to this config file.
+  path: outputs/${model_slug}_box_builder_eval.jsonl
+  # Optional; if null/omitted, defaults to `{path.stem}.simple.jsonl` next to `path`.
+  simple_path: null
+  overwrite: false
+  write_prompt: false
+  write_task: false
+
+model:
+  backend: transformers
+  model_name_or_path: Qwen/Qwen2.5-7B-Instruct
+  tokenizer_name_or_path: null
+  trust_remote_code: true
+  revision: null
+  dtype: bfloat16 # one of: float16, bfloat16, float32
+  device_map: auto # e.g. auto, cuda:0, cpu
+  load_in_4bit: false
+  load_in_8bit: false
+
+generation:
+  use_chat_template: true
+  max_new_tokens: 1024
+  do_sample: true
+  temperature: 0.2
+  top_p: 0.95
+  repetition_penalty: 1.05
+  num_return_sequences: 1
+
+minecraft:
+  enabled: false
+  host: 127.0.0.1
+  port: 25565
+  username: executor_bot
+  version: null
+  origin_mode: spawn_offset # one of: spawn_offset, fixed
+  spawn_offset: [2, 0, 2]
+  world_origin: null
+  reset_before_each: true
+  teleport_before_each: true
+  step_delay_ms: 200
+  scan_delay_ms: 250
+  timeout_ms: 120000
+  max_commands: 600
+
+prompt:
+  system: |
+    You are a Minecraft building agent.
+    Output must be Minecraft commands only (no markdown, no code fences, no extra text).
+  user_template: |
+    Build the 3D structure from the provided y-axis slices.
+
+    Legend (char -> block id):
+    {legend_lines}
+
+    Allowed blocks (use ONLY these):
+    {block_agent1_lines}
+
+    Layers (y from min_y to max_y; each layer lists rows for z=min_z..max_z):
+    {layers_text}
+
+    WORLD bbox (inclusive):
+    - from: {world_bbox_from}
+    - to:   {world_bbox_to}
+
+    Coordinate mapping (absolute coords):
+    - Let (min_x, min_y, min_z) be bbox.from and (max_x, max_y, max_z) be bbox.to.
+    - x increases from min_x to max_x (left to right within each row).
+    - y increases from min_y to max_y (layer index).
+    - z increases from min_z to max_z (top-to-bottom row order as given).
+
+    Constraints:
+    - Output ONLY Minecraft commands, one per line.
+    - Allowed commands: /setblock, /fill
+    - Use absolute integer coordinates only (no ~).
+    - Use ONLY blocks from the legend.
+    - Every coordinate must be within the bbox.
+
+  # Optional overrides used when agents.num_agents=2.
+  user_template_agent1: |
+    You are Agent 1 in a 2-person Minecraft building team. You will place SOME of the blocks for the final build.
+
+    Task: Build the 3D structure from y-axis slices.
+
+    Legend (char -> block id):
+    {legend_lines}
+
+    Allowed blocks (use ONLY these):
+    {block_agent1_lines}
+
+    Layers (y from min_y to max_y; each layer lists rows for z=min_z..max_z):
+    {layers_text}
+
+    WORLD bbox (inclusive):
+    - from: {world_bbox_from}
+    - to:   {world_bbox_to}
+
+    Coordinate mapping (absolute coords):
+    - Let (min_x, min_y, min_z) be bbox.from and (max_x, max_y, max_z) be bbox.to.
+    - x increases from min_x to max_x (left to right within each row).
+    - y increases from min_y to max_y (layer index).
+    - z increases from min_z to max_z (top-to-bottom row order as given).
+
+    Constraints:
+    - Output ONLY Minecraft commands, one per line.
+    - Allowed commands: /setblock, /fill
+    - Use absolute integer coordinates only (no ~).
+    - Use ONLY blocks from the legend.
+    - Every coordinate must be within the bbox.
+
+  user_template_agent2: |
+    You are Agent 2 in a 2-person Minecraft building team. You will place SOME of the blocks for the final build.
+
+    Task: Build the 3D structure from y-axis slices.
+
+    Legend (char -> block id):
+    {legend_lines}
+
+    Allowed blocks (use ONLY these):
+    {block_agent2_lines}
+
+    Layers (y from min_y to max_y; each layer lists rows for z=min_z..max_z):
+    {layers_text}
+
+    WORLD bbox (inclusive):
+    - from: {world_bbox_from}
+    - to:   {world_bbox_to}
+
+    Coordinate mapping (absolute coords):
+    - Let (min_x, min_y, min_z) be bbox.from and (max_x, max_y, max_z) be bbox.to.
+    - x increases from min_x to max_x (left to right within each row).
+    - y increases from min_y to max_y (layer index).
+    - z increases from min_z to max_z (top-to-bottom row order as given).
+
+    Constraints:
+    - Output ONLY Minecraft commands, one per line.
+    - Allowed commands: /setblock, /fill
+    - Use absolute integer coordinates only (no ~).
+    - Use ONLY blocks from the legend.
+    - Every coordinate must be within the bbox.
