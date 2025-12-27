@@ -476,6 +476,9 @@ def main() -> int:
         external_mode = str(external_cfg.get("mode") or "perfect_feedback")
         original_prompt_flag = bool(external_cfg.get("original_prompt", True))
         previous_response_flag = bool(external_cfg.get("previous_response", False))
+        modification_limit = external_cfg.get("lim")
+        if modification_limit is None:
+            modification_limit = external_cfg.get("modification_limit")
 
         num_agents_default = int(num_agents)
 
@@ -486,6 +489,7 @@ def main() -> int:
                 agent_completions=agent_completions,
                 num_agents=n_agents,
                 mode=external_mode,
+                limit=modification_limit,
                 original_prompt=original_prompt_flag,
                 previous_response=previous_response_flag,
                 prompt_history_per_agent=_kwargs.get("prompt_history_per_agent"),

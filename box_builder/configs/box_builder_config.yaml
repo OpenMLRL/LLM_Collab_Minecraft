@@ -6,7 +6,7 @@ seed: 42
 
 collab:
   # GRPO = num_agents=1. (CoMLRL's MAGRPOTrainer supports num_agents>=1.)
-  num_agents: 2
+  num_agents: 1
 
 data:
   # Path is resolved relative to this config file.
@@ -28,11 +28,13 @@ prompt:
 
 external:
   # Only used when trainer.num_turns > 1.
-  mode: position_feedback
-  # Include the original (turn-1) prompt after the ASCII feedback.
+  mode: position_modification
+  # Include the original (turn-1) prompt in external feedback.
   original_prompt: true
   # Optionally include previous commands verbatim (usually keep false).
   previous_response: false
+  # Max number of wrong positions to suggest in modification mode.
+  lim: 20
 
 model:
   name: Qwen/Qwen3-4B-Instruct-2507
@@ -51,7 +53,7 @@ trainer:
   output_dir: TODO
   num_train_epochs: 150
   per_device_train_batch_size: 1
-  learning_rate: 5e-6
+  learning_rate: 1e-5
   logging_steps: 20
   save_steps: 200
   num_generations: 2
