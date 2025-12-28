@@ -11,9 +11,6 @@ DEFAULT_SYSTEM_PROMPT = (
 
 DEFAULT_USER_TEMPLATE = """Build the 3D structure from the provided y-axis slices.
 
-Legend (char -> block id):
-{legend_lines}
-
 Available blocks (use ONLY these):
 {block_agent1_lines}
 
@@ -38,9 +35,6 @@ DEFAULT_USER_TEMPLATE_AGENT1 = """You are Agent 1 in a 2-person Minecraft buildi
 
 Task: Build the 3D structure from the provided y-axis slices.
 
-Legend (char -> block id):
-{legend_lines}
-
 Available blocks (use ONLY these):
 {block_agent1_lines}
 
@@ -64,9 +58,6 @@ Constraints:
 DEFAULT_USER_TEMPLATE_AGENT2 = """You are Agent 2 in a 2-person Minecraft building team. You will place SOME of the blocks for the final build.
 
 Task: Build the 3D structure from the provided y-axis slices.
-
-Legend (char -> block id):
-{legend_lines}
 
 Available blocks (use ONLY these):
 {block_agent2_lines}

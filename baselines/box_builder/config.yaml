@@ -69,9 +69,6 @@ prompt:
   user_template: |
     Build the 3D structure from the provided y-axis slices.
 
-    Legend (char -> block id):
-    {legend_lines}
-
     Allowed blocks (use ONLY these):
     {block_agent1_lines}
 
@@ -103,9 +100,6 @@ prompt:
 
     Task: Build the 3D structure from y-axis slices.
 
-    Legend (char -> block id):
-    {legend_lines}
-
     Allowed blocks (use ONLY these):
     {block_agent1_lines}
 
@@ -135,9 +129,6 @@ prompt:
     You are Agent 2 in a 2-person Minecraft building team. You will place SOME of the blocks for the final build.
 
     Task: Build the 3D structure from y-axis slices.
-
-    Legend (char -> block id):
-    {legend_lines}
 
     Allowed blocks (use ONLY these):
     {block_agent2_lines}
