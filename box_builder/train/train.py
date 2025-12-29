@@ -341,12 +341,18 @@ def main() -> int:
         dir_val = wandb_cfg.get("dir") or wandb_cfg.get("output_dir")
         if dir_val:
             dir_val = expand_jobid_placeholder(str(dir_val))
+        num_turns = 1
+        try:
+            num_turns = int(getattr(magrpo_args, "num_turns", 1))
+        except Exception:
+            num_turns = 1
+        turns_suffix = f"_{num_turns}t"
         wandb_config = {
             "project": wandb_cfg.get("project", "box_builder"),
             "entity": wandb_cfg.get("entity", None),
-            "name": f"{run_name}_{num_agents}agents",
+            "name": f"{run_name}_{num_agents}agents{turns_suffix}",
             "dir": dir_val,
-            "tags": ["box_builder", f"agents_{num_agents}"],
+            "tags": ["box_builder", f"agents_{num_agents}", f"turns_{num_turns}"],
         }
         if wandb_config.get("dir"):
             os.environ.setdefault("WANDB_DIR", str(wandb_config["dir"]))
