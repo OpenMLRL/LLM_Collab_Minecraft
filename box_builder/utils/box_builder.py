@@ -105,6 +105,13 @@ def validate_and_normalize_mc_commands(
             continue
         cmd = parts[0].lower()
 
+        if cmd == "kill":
+            kill_cmd = "/kill"
+            if len(parts) > 1:
+                kill_cmd = kill_cmd + " " + " ".join(parts[1:])
+            accepted.append(kill_cmd)
+            continue
+
         if cmd != "fill":
             rejected.append({"line": line, "reason": f"unsupported command: {cmd}"})
             continue

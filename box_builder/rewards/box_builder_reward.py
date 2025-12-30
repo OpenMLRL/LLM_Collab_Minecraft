@@ -37,6 +37,47 @@ def _task_from_batch_item(item: Mapping[str, Any]) -> TaskSpec:
     )
 
 
+def _get_rpg_state(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    state = cfg.get("_rpg_state")
+    if isinstance(state, dict):
+        return state
+
+    rpg_cfg = cfg.get("RPG") or cfg.get("rpg") or {}
+    if not isinstance(rpg_cfg, dict):
+        rpg_cfg = {}
+    player_cfg = rpg_cfg.get("player") or {}
+    spider_cfg = rpg_cfg.get("spider") or {}
+
+    player_hp = _as_int(player_cfg.get("hp", 0), 0)
+    spider_num = _as_int(spider_cfg.get("num", 0), 0)
+
+    atk_values_raw = spider_cfg.get("atk_values") or spider_cfg.get("atk_list") or spider_cfg.get("atk")
+    atk_values: List[float] = []
+    if isinstance(atk_values_raw, (list, tuple)):
+        for v in atk_values_raw:
+            try:
+                atk_values.append(float(v))
+            except Exception:
+                continue
+    elif atk_values_raw is not None:
+        try:
+            atk_val = float(atk_values_raw)
+            if spider_num > 0:
+                atk_values = [atk_val for _ in range(spider_num)]
+            else:
+                atk_values = [atk_val]
+        except Exception:
+            atk_values = []
+
+    total_dmg = float(sum(atk_values))
+    return {
+        "player_hp": player_hp,
+        "spider_num": spider_num,
+        "spider_atk_values": atk_values,
+        "spider_total_dmg": total_dmg,
+    }
+
+
 def get_reward_function(*, cfg: Dict[str, Any], num_agents: int) -> Callable[..., List[float]]:
     task_cfg = cfg.get("task") or {}
     if not isinstance(task_cfg, dict):
@@ -74,6 +115,7 @@ def get_reward_function(*, cfg: Dict[str, Any], num_agents: int) -> Callable[...
     debug_raw_output = bool(debug_cfg.get("raw_output", False))
     debug_render_layers = bool(debug_cfg.get("render_merged_layers", True))
     debug_state = {"calls": 0, "printed": 0}
+    rpg_state = _get_rpg_state(cfg)
 
     def _allowed_blocks_for_task(task: TaskSpec, overrides: List[str]) -> List[str]:
         if overrides:
@@ -197,6 +239,17 @@ def get_reward_function(*, cfg: Dict[str, Any], num_agents: int) -> Callable[...
     max_commands_per_agent = max(1, max_commands_total // num_agents)
     max_commands_agent1 = max_commands_per_agent + (max_commands_total % num_agents)
     max_commands_agent2 = max_commands_per_agent
+    player_hp_for_penalty = float(rpg_state.get("player_hp", 0) or 0)
+    spider_dmg_for_penalty = float(rpg_state.get("spider_total_dmg", 0) or 0)
+
+    def _has_kill(cmds: List[str]) -> bool:
+        for cmd in cmds:
+            stripped = (cmd or "").strip()
+            if stripped.startswith("/"):
+                stripped = stripped[1:].lstrip()
+            if stripped.lower().startswith("kill"):
+                return True
+        return False
 
     def reward_fn(
         agent1_completions: List[str],
@@ -244,6 +297,11 @@ def get_reward_function(*, cfg: Dict[str, Any], num_agents: int) -> Callable[...
         )
         metrics = score_box_builder(task=task, world_scan_blocks=blocks)
         reward = float(metrics.get("score_mean", 0.0))
+
+        if spider_dmg_for_penalty > 0 and player_hp_for_penalty > 0:
+            if not _has_kill(accepted_1) and not _has_kill(accepted_2):
+                reward -= min(1.0, spider_dmg_for_penalty / player_hp_for_penalty) * 0.1
+
         if debug_enabled:
             _maybe_debug_print(
                 task=task,

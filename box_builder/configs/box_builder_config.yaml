@@ -23,6 +23,15 @@ task:
   # Enable per-agent resource limits based on target block counts.
   limited_resource: true
 
+# RPG-style safety context shown in prompts and used for reward shaping.
+RPG:
+  player:
+    hp: 5
+  spider:
+    num: 3
+    atk_low: 1
+    atk_high: 3
+
 # Prompt templates are defined in utils/prompting.py; override here if needed.
 prompt:
   # Use tokenizer.apply_chat_template when available.
@@ -42,7 +51,7 @@ external:
   common_suffix: "Do not output any text other than commands."
 
 model:
-  name: Qwen/Qwen3-4B-Instruct-2507
+  name: Qwen/Qwen2.5-3B-Instruct
   tokenizer_kwargs: {}
   model_kwargs:
     trust_remote_code: true

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import random
 import sys
 import time
 from typing import Any, Dict, List, Tuple
@@ -78,6 +79,86 @@ def _map_dtype(dtype_cfg: Any) -> Any:
     return None
 
 
+def _as_int(value: Any, default: int) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return int(default)
+
+
+def _prepare_rpg_state(cfg: Dict[str, Any], seed: int) -> Dict[str, Any]:
+    rpg_cfg = cfg.get("RPG") or cfg.get("rpg") or {}
+    if not isinstance(rpg_cfg, dict):
+        rpg_cfg = {}
+
+    player_cfg = rpg_cfg.get("player") or {}
+    spider_cfg = rpg_cfg.get("spider") or {}
+
+    player_hp = _as_int(player_cfg.get("hp", 20), 20)
+
+    spider_num = max(0, _as_int(spider_cfg.get("num", 0), 0))
+    atk_low_raw = spider_cfg.get("atk_low", spider_cfg.get("atk"))
+    atk_high_raw = spider_cfg.get("atk_high", spider_cfg.get("atk"))
+    atk_low = _as_int(atk_low_raw, 0)
+    atk_high = _as_int(atk_high_raw, atk_low)
+    if atk_high < atk_low:
+        atk_low, atk_high = atk_high, atk_low
+
+    rng = random.Random(int(seed))
+    atk_values: List[int] = []
+    for _ in range(spider_num):
+        try:
+            atk_values.append(int(rng.randint(atk_low, atk_high)))
+        except Exception:
+            atk_values.append(int(atk_low))
+    total_dmg = float(sum(atk_values))
+
+    spider_cfg = dict(spider_cfg)
+    spider_cfg["atk_low"] = atk_low
+    spider_cfg["atk_high"] = atk_high
+    spider_cfg["atk_values"] = atk_values
+    spider_cfg["dmg"] = total_dmg
+    spider_cfg["num"] = spider_num
+
+    player_cfg = dict(player_cfg)
+    player_cfg["hp"] = player_hp
+
+    rpg_cfg["player"] = player_cfg
+    rpg_cfg["spider"] = spider_cfg
+    cfg["RPG"] = rpg_cfg
+
+    rpg_state = {
+        "player_hp": player_hp,
+        "spider_num": spider_num,
+        "spider_atk_low": atk_low,
+        "spider_atk_high": atk_high,
+        "spider_atk_values": atk_values,
+        "spider_total_dmg": total_dmg,
+    }
+    cfg["_rpg_state"] = rpg_state
+    return rpg_state
+
+
+def _rpg_placeholders(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    state = cfg.get("_rpg_state")
+    if not isinstance(state, dict):
+        state = {}
+    spider_atk_values = state.get("spider_atk_values") or []
+    if isinstance(spider_atk_values, (int, float)):
+        spider_atk_values = [spider_atk_values]
+    try:
+        atk_iter = list(spider_atk_values)
+    except Exception:
+        atk_iter = []
+    spider_atk_list = "[" + ", ".join(str(v) for v in atk_iter) + "]" if atk_iter else "[]"
+    return {
+        "player_hp": state.get("player_hp", 0),
+        "spider_num": state.get("spider_num", 0),
+        "spider_atk": spider_atk_list,
+        "spider_dmg": state.get("spider_total_dmg", 0),
+    }
+
+
 def _render_prompt(
     *,
     tokenizer: Any | None,
@@ -116,6 +197,7 @@ def _build_formatters(cfg: Dict[str, Any], *, num_agents: int, tokenizer: Any | 
     if not isinstance(task_cfg, dict):
         task_cfg = {}
     limited_resource = bool(task_cfg.get("limited_resource", False))
+    rpg_kwargs = _rpg_placeholders(cfg)
 
     def _as_block_list(v: Any) -> List[str]:
         if v is None:
@@ -200,6 +282,10 @@ def _build_formatters(cfg: Dict[str, Any], *, num_agents: int, tokenizer: Any | 
             layers_text=layers_text,
             block_agent1_lines=block_agent1_lines,
             block_agent2_lines=block_agent2_lines,
+            spider_num=rpg_kwargs.get("spider_num"),
+            player_hp=rpg_kwargs.get("player_hp"),
+            spider_atk=rpg_kwargs.get("spider_atk"),
+            spider_dmg=rpg_kwargs.get("spider_dmg"),
         ).rstrip()
         resource_limits_text = _format_resource_limits(task)
         if resource_limits_text:
@@ -246,6 +332,8 @@ def main() -> int:
             seed = int(secrets.randbits(32))
         except Exception:
             seed = int(time.time()) & 0x7FFFFFFF
+
+    _prepare_rpg_state(cfg, seed)
 
     collab_cfg = cfg.get("collab") or {}
     if not isinstance(collab_cfg, dict):
@@ -428,6 +516,7 @@ def main() -> int:
                 return unique_block_list(palette.values())
             return []
 
+        rpg_kwargs = _rpg_placeholders(cfg)
         context_map: Dict[str, Any] = {}
 
         def _register_split(ds: Dataset) -> None:
@@ -483,6 +572,10 @@ def main() -> int:
                     "layers_text": layers_text,
                     "block_agent1_lines": block_agent1_lines,
                     "block_agent2_lines": block_agent2_lines,
+                    "spider_num": rpg_kwargs.get("spider_num"),
+                    "player_hp": rpg_kwargs.get("player_hp"),
+                    "spider_atk": rpg_kwargs.get("spider_atk"),
+                    "spider_dmg": rpg_kwargs.get("spider_dmg"),
                 }
                 base_user_single = user_template.format(**fmt_kwargs).rstrip()
                 base_user_agent1 = user_template_agent1.format(**fmt_kwargs).rstrip()

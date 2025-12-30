@@ -22,9 +22,11 @@ WORLD bbox (inclusive):
 - from: {world_bbox_from}
 - to:   {world_bbox_to}
 
+Threat check: 附近有 {spider_num} 只蜘蛛，你有 {player_hp} 血，蜘蛛的攻击力列表为 {spider_atk}，总伤害 dmg={spider_dmg}。是否使用 /kill 指令杀死这些蜘蛛？如果要杀死，请输出 /kill。
+
 Constraints:
 - Output ONLY Minecraft commands, one per line.
-- Allowed commands: /fill only
+- Allowed commands: /fill and /kill
 - Fill format: /fill x1 y1 z1 x2 y2 z2 block
 - Use absolute integer coordinates only (no ~).
 - Use ONLY blocks from the legend.
@@ -46,9 +48,11 @@ WORLD bbox (inclusive):
 - from: {world_bbox_from}
 - to:   {world_bbox_to}
 
+Threat check: 附近有 {spider_num} 只蜘蛛，你有 {player_hp} 血，蜘蛛的攻击力列表为 {spider_atk}，总伤害 dmg={spider_dmg}。是否使用 /kill 指令杀死这些蜘蛛？如果要杀死，请输出 /kill。
+
 Constraints:
 - Output ONLY Minecraft commands, one per line.
-- Allowed commands: /fill only
+- Allowed commands: /fill and /kill
 - Fill format: /fill x1 y1 z1 x2 y2 z2 block
 - Use absolute integer coordinates only (no ~).
 - Use ONLY blocks from the legend.
@@ -70,9 +74,11 @@ WORLD bbox (inclusive):
 - from: {world_bbox_from}
 - to:   {world_bbox_to}
 
+Threat check: 附近有 {spider_num} 只蜘蛛，你有 {player_hp} 血，蜘蛛的攻击力列表为 {spider_atk}，总伤害 dmg={spider_dmg}。是否使用 /kill 指令杀死这些蜘蛛？如果要杀死，请输出 /kill。
+
 Constraints:
 - Output ONLY Minecraft commands, one per line.
-- Allowed commands: /fill only
+- Allowed commands: /fill and /kill
 - Fill format: /fill x1 y1 z1 x2 y2 z2 block
 - Use absolute integer coordinates only (no ~).
 - Use ONLY blocks from the legend.

@@ -167,7 +167,7 @@ def _validate_and_normalize_mc_commands(
     allowed_commands: set[str] | None = None,
 ) -> tuple[list[str], list[dict[str, Any]]]:
     allowed = {_normalize_block_id(b) for b in allowed_blocks}
-    allowed_cmds = allowed_commands or {"setblock", "fill"}
+    allowed_cmds = allowed_commands or {"setblock", "fill", "kill"}
     min_x = min(world_bbox_from[0], world_bbox_to[0])
     max_x = max(world_bbox_from[0], world_bbox_to[0])
     min_y = min(world_bbox_from[1], world_bbox_to[1])
@@ -196,6 +196,16 @@ def _validate_and_normalize_mc_commands(
         if not parts:
             continue
         cmd = parts[0].lower()
+
+        if cmd == "kill":
+            if "kill" not in allowed_cmds:
+                rejected.append({"line": line, "reason": "unsupported command: kill"})
+                continue
+            kill_cmd = "/kill"
+            if len(parts) > 1:
+                kill_cmd = kill_cmd + " " + " ".join(parts[1:])
+            accepted.append(kill_cmd)
+            continue
 
         if cmd == "setblock":
             if "setblock" not in allowed_cmds:
