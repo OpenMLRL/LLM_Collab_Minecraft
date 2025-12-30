@@ -22,7 +22,7 @@ WORLD bbox (inclusive):
 - from: {world_bbox_from}
 - to:   {world_bbox_to}
 
-Threat check: 附近有 {spider_num} 只蜘蛛，你有 {player_hp} 血，蜘蛛的攻击力列表为 {spider_atk}，总伤害 dmg={spider_dmg}。是否使用 /kill 指令杀死这些蜘蛛？如果要杀死，请输出 /kill。
+Threat check: There are {spider_num} spiders nearby; you have {player_hp} HP. Spider attack list: {spider_atk}, total damage dmg={spider_dmg}. If you want to kill them, output exactly one line: /kill. All other commands should be normal building commands.
 
 Constraints:
 - Output ONLY Minecraft commands, one per line.
@@ -48,7 +48,7 @@ WORLD bbox (inclusive):
 - from: {world_bbox_from}
 - to:   {world_bbox_to}
 
-Threat check: 附近有 {spider_num} 只蜘蛛，你有 {player_hp} 血，蜘蛛的攻击力列表为 {spider_atk}，总伤害 dmg={spider_dmg}。是否使用 /kill 指令杀死这些蜘蛛？如果要杀死，请输出 /kill。
+Threat check: There are {spider_num} spiders nearby; you have {player_hp} HP. Spider attack list: {spider_atk}, total damage dmg={spider_dmg}. If you want to kill them, output exactly one line: /kill. All other commands should be normal building commands.
 
 Constraints:
 - Output ONLY Minecraft commands, one per line.
@@ -74,7 +74,7 @@ WORLD bbox (inclusive):
 - from: {world_bbox_from}
 - to:   {world_bbox_to}
 
-Threat check: 附近有 {spider_num} 只蜘蛛，你有 {player_hp} 血，蜘蛛的攻击力列表为 {spider_atk}，总伤害 dmg={spider_dmg}。是否使用 /kill 指令杀死这些蜘蛛？如果要杀死，请输出 /kill。
+Threat check: There are {spider_num} spiders nearby; you have {player_hp} HP. Spider attack list: {spider_atk}, total damage dmg={spider_dmg}. If you want to kill them, output exactly one line: /kill. All other commands should be normal building commands.
 
 Constraints:
 - Output ONLY Minecraft commands, one per line.
