@@ -767,11 +767,12 @@ def _format_layers_text(
                 for x1, z1, x2, z2, block in rects
                 if _normalize_block_id(str(block)) not in ("air", "cave_air", "void_air")
             ]
+        y_abs = y + offset_y
         rect_parts = [
-            f"({x1 + offset_x}, {z1 + offset_z}, {x2 + offset_x}, {z2 + offset_z} {block})"
+            f"({x1 + offset_x}, {y_abs}, {z1 + offset_z}, {x2 + offset_x}, {y_abs}, {z2 + offset_z} {block})"
             for x1, z1, x2, z2, block in rects
         ]
-        lines.append(f"y={y + offset_y}: {{{', '.join(rect_parts)}}}")
+        lines.append(f"y={y_abs}: {{{', '.join(rect_parts)}}}")
     return "\n".join(lines)
 
 

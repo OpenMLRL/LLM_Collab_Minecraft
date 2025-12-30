@@ -551,11 +551,12 @@ def format_layers_text(
         rects = rows_to_rects(rows=rows, palette=task.palette, min_x=min_x, min_z=min_z)
         if not include_air:
             rects = [r for r in rects if normalize_block_id(r[4]) not in ("air", "cave_air", "void_air")]
+        y_abs = y + offset_y
         rect_parts = [
-            f"({x1 + offset_x}, {z1 + offset_z}, {x2 + offset_x}, {z2 + offset_z} {block})"
+            f"({x1 + offset_x}, {y_abs}, {z1 + offset_z}, {x2 + offset_x}, {y_abs}, {z2 + offset_z} {block})"
             for x1, z1, x2, z2, block in rects
         ]
-        lines.append(f"y={y + offset_y}: {{{', '.join(rect_parts)}}}")
+        lines.append(f"y={y_abs}: {{{', '.join(rect_parts)}}}")
     return "\n".join(lines)
 
 

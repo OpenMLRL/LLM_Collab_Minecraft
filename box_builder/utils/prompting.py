@@ -15,7 +15,7 @@ Available blocks (use ONLY these):
 {block_agent1_lines}
 
 Layers (ascending WORLD y). Each layer is a set of rectangles in WORLD (x,z) coords:
-- Format: y=ABS_Y: {{(x1, z1, x2, z2 block_id), (x1, z1, x2, z2 block_id)}}
+- Format: y=ABS_Y: {{(x1, ABS_Y, z1, x2, ABS_Y, z2 block_id), (x1, ABS_Y, z1, x2, ABS_Y, z2 block_id)}}
 {layers_text}
 
 WORLD bbox (inclusive):
@@ -39,7 +39,7 @@ Available blocks (use ONLY these):
 {block_agent1_lines}
 
 Layers (ascending WORLD y). Each layer is a set of rectangles in WORLD (x,z) coords:
-- Format: y=ABS_Y: {{(x1, z1, x2, z2 block_id), (x1, z1, x2, z2 block_id)}}
+- Format: y=ABS_Y: {{(x1, ABS_Y, z1, x2, ABS_Y, z2 block_id), (x1, ABS_Y, z1, x2, ABS_Y, z2 block_id)}}
 {layers_text}
 
 WORLD bbox (inclusive):
@@ -63,7 +63,7 @@ Available blocks (use ONLY these):
 {block_agent2_lines}
 
 Layers (ascending WORLD y). Each layer is a set of rectangles in WORLD (x,z) coords:
-- Format: y=ABS_Y: {{(x1, z1, x2, z2 block_id), (x1, z1, x2, z2 block_id)}}
+- Format: y=ABS_Y: {{(x1, ABS_Y, z1, x2, ABS_Y, z2 block_id), (x1, ABS_Y, z1, x2, ABS_Y, z2 block_id)}}
 {layers_text}
 
 WORLD bbox (inclusive):
