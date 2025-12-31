@@ -78,6 +78,7 @@ def get_trainer_args(cfg: Dict[str, Any]) -> MAGRPOConfig:
         "output_dir": output_dir_resolved,
         "num_train_epochs": _as_int(tr.get("num_train_epochs", 3), 3),
         "per_device_train_batch_size": _as_int(tr.get("per_device_train_batch_size", 1), 1),
+        "rollout_buffer_size": _as_int(tr.get("rollout_buffer_size", 2), 2),
         "learning_rate": _as_float(lr_val, 3e-5),
         "logging_steps": _as_int(tr.get("logging_steps", 50), 50),
         "save_steps": _as_int(tr.get("save_steps", 200), 200),
@@ -87,6 +88,8 @@ def get_trainer_args(cfg: Dict[str, Any]) -> MAGRPOConfig:
         "top_p": _as_float(tr.get("top_p", 0.95), 0.95),
         "num_turns": _as_int(tr.get("num_turns", 1), 1),
         "joint_mode": joint_mode_str,
+        "discount": _as_float(tr.get("discount", tr.get("gamma", 0.9)), 0.9),
+        "termination_threshold": _as_opt_float(tr.get("termination_threshold", None), None),
         "normalize_advantage": bool(tr.get("normalize_advantage", False)),
         "epsilon_clip": _as_opt_float(tr.get("epsilon_clip", None), None),
     }
