@@ -12,7 +12,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 CONFIG_REL="configs/str_rainbow_config.yaml"
-TRAIN_REL="train/train.py"
+TRAIN_REL="train/train_magrpo.py"
 
 # SLURM defaults (override via env)
 ACCOUNT="${ACCOUNT_OVERRIDE:-${ACCOUNT:-}}"
@@ -30,7 +30,7 @@ if [[ -z "${ACCOUNT}" || -z "${PARTITION}" ]]; then
 fi
 
 # Output dir defaults (YAML placeholders are TODO; set real paths here)
-OUTPUT_BASE_DEFAULT="/projects/bevi/${USER}/output/str_rainbow/[jobid]"
+OUTPUT_BASE_DEFAULT="/projects/bevi/${USER}/output/str_rainbow"
 OUTPUT_BASE="${OUTPUT_BASE_OVERRIDE:-$OUTPUT_BASE_DEFAULT}"
 TRAIN_OUTPUT_DIR="${TRAIN_OUTPUT_DIR_OVERRIDE:-$OUTPUT_BASE}"
 WAND_OUTPUT_DIR="${WAND_OUTPUT_DIR_OVERRIDE:-${OUTPUT_BASE}/wandb}"
@@ -52,8 +52,8 @@ fi
 if [[ -n "${WAND_ENTITY_OVERRIDE}" ]]; then
   OVERRIDE="${OVERRIDE:+${OVERRIDE},}wandb.entity=${WAND_ENTITY_OVERRIDE}"
 fi
-OVERRIDE="${OVERRIDE:+${OVERRIDE},}trainer.output_dir=${TRAIN_OUTPUT_DIR}"
-OVERRIDE="${OVERRIDE:+${OVERRIDE},}wandb.output_dir=${WAND_OUTPUT_DIR}"
+OVERRIDE="${OVERRIDE:+${OVERRIDE},}output.base_dir=${TRAIN_OUTPUT_DIR}"
+OVERRIDE="${OVERRIDE:+${OVERRIDE},}wandb.dir=${WAND_OUTPUT_DIR}"
 OVERRIDE="${OVERRIDE:+${OVERRIDE},}output.save_path=${FINAL_SAVE_PATH}"
 
 CONFIG_PATH="${CONFIG_PATH_OVERRIDE:-${REPO_DIR}/${CONFIG_REL}}"

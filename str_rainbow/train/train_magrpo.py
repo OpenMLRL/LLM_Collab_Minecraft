@@ -3,9 +3,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import random
 import sys
 import time
+from functools import partial
 from typing import Any, Dict, List, Tuple
 
 try:
@@ -14,7 +14,6 @@ except Exception as e:  # pragma: no cover
     raise RuntimeError(f"PyYAML is required. Install pyyaml. Error: {e}")
 
 
-# Make repo importable as a package.
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(REPO_ROOT))
 
@@ -25,24 +24,20 @@ import torch  # type: ignore
 from comlrl.trainers.magrpo import MAGRPOTrainer  # type: ignore
 from comlrl.utils.reward_processor import RewardProcessors  # type: ignore
 
-from LLM_Collab_MC.box_builder.external import (
+from LLM_Collab_MC.str_rainbow.external import (
     get_external_transition as external_get_transition,
     set_context_resolver as external_set_context_resolver,
 )
-from LLM_Collab_MC.box_builder.rewards.box_builder_reward import get_reward_function
-from LLM_Collab_MC.box_builder.utils.box_builder import (
-    TaskSpec,
-    compute_resource_limits,
-    format_layers_text,
-    legend_lines,
-    load_tasks_from_json,
-    normalize_block_id,
-    unique_block_list,
+from LLM_Collab_MC.str_rainbow.loggers.mt_str_rainbow_logger import (
+    aggregate_mt_str_rainbow_metrics,
+    mt_str_rainbow_logger,
 )
-from LLM_Collab_MC.box_builder.utils.config import apply_overrides, expand_jobid_placeholder, load_yaml, resolve_path
-from LLM_Collab_MC.box_builder.utils.patches import apply_default_patches
-from LLM_Collab_MC.box_builder.utils.prompting import apply_prompt_defaults
-from LLM_Collab_MC.box_builder.utils.trainer_args import get_trainer_args
+from LLM_Collab_MC.str_rainbow.rewards.str_rainbow_reward import get_reward_function
+from LLM_Collab_MC.str_rainbow.utils.config import apply_overrides, load_yaml, resolve_path
+from LLM_Collab_MC.str_rainbow.utils.patches import apply_default_patches
+from LLM_Collab_MC.str_rainbow.utils.prompting import apply_graph_setting, apply_prompt_defaults
+from LLM_Collab_MC.str_rainbow.utils.str_rainbow import load_tasks_from_csv
+from LLM_Collab_MC.str_rainbow.utils.trainer_args import get_trainer_args
 
 
 def _split_list(items: List[Dict[str, Any]], split_ratio: float, seed: int) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
@@ -79,86 +74,6 @@ def _map_dtype(dtype_cfg: Any) -> Any:
     return None
 
 
-def _as_int(value: Any, default: int) -> int:
-    try:
-        return int(value)
-    except Exception:
-        return int(default)
-
-
-def _prepare_rpg_state(cfg: Dict[str, Any], seed: int) -> Dict[str, Any]:
-    rpg_cfg = cfg.get("RPG") or cfg.get("rpg") or {}
-    if not isinstance(rpg_cfg, dict):
-        rpg_cfg = {}
-
-    player_cfg = rpg_cfg.get("player") or {}
-    spider_cfg = rpg_cfg.get("spider") or {}
-
-    player_hp = _as_int(player_cfg.get("hp", 20), 20)
-
-    spider_num = max(0, _as_int(spider_cfg.get("num", 0), 0))
-    atk_low_raw = spider_cfg.get("atk_low", spider_cfg.get("atk"))
-    atk_high_raw = spider_cfg.get("atk_high", spider_cfg.get("atk"))
-    atk_low = _as_int(atk_low_raw, 0)
-    atk_high = _as_int(atk_high_raw, atk_low)
-    if atk_high < atk_low:
-        atk_low, atk_high = atk_high, atk_low
-
-    rng = random.Random(int(seed))
-    atk_values: List[int] = []
-    for _ in range(spider_num):
-        try:
-            atk_values.append(int(rng.randint(atk_low, atk_high)))
-        except Exception:
-            atk_values.append(int(atk_low))
-    total_dmg = float(sum(atk_values))
-
-    spider_cfg = dict(spider_cfg)
-    spider_cfg["atk_low"] = atk_low
-    spider_cfg["atk_high"] = atk_high
-    spider_cfg["atk_values"] = atk_values
-    spider_cfg["dmg"] = total_dmg
-    spider_cfg["num"] = spider_num
-
-    player_cfg = dict(player_cfg)
-    player_cfg["hp"] = player_hp
-
-    rpg_cfg["player"] = player_cfg
-    rpg_cfg["spider"] = spider_cfg
-    cfg["RPG"] = rpg_cfg
-
-    rpg_state = {
-        "player_hp": player_hp,
-        "spider_num": spider_num,
-        "spider_atk_low": atk_low,
-        "spider_atk_high": atk_high,
-        "spider_atk_values": atk_values,
-        "spider_total_dmg": total_dmg,
-    }
-    cfg["_rpg_state"] = rpg_state
-    return rpg_state
-
-
-def _rpg_placeholders(cfg: Dict[str, Any]) -> Dict[str, Any]:
-    state = cfg.get("_rpg_state")
-    if not isinstance(state, dict):
-        state = {}
-    spider_atk_values = state.get("spider_atk_values") or []
-    if isinstance(spider_atk_values, (int, float)):
-        spider_atk_values = [spider_atk_values]
-    try:
-        atk_iter = list(spider_atk_values)
-    except Exception:
-        atk_iter = []
-    spider_atk_list = "[" + ", ".join(str(v) for v in atk_iter) + "]" if atk_iter else "[]"
-    return {
-        "player_hp": state.get("player_hp", 0),
-        "spider_num": state.get("spider_num", 0),
-        "spider_atk": spider_atk_list,
-        "spider_dmg": state.get("spider_total_dmg", 0),
-    }
-
-
 def _render_prompt(
     *,
     tokenizer: Any | None,
@@ -186,18 +101,19 @@ def _build_formatters(cfg: Dict[str, Any], *, num_agents: int, tokenizer: Any | 
     prompt_cfg = cfg.get("prompt") or {}
     if not isinstance(prompt_cfg, dict):
         prompt_cfg = {}
+    provide_graph = bool(prompt_cfg.get("provide_graph", True))
     use_chat_template = bool(prompt_cfg.get("use_chat_template", False))
-    include_air_rects = bool(prompt_cfg.get("include_air_rects", False))
     system_prompt = str(prompt_cfg.get("system") or "").rstrip()
     user_template = str(prompt_cfg.get("user_template") or "").rstrip()
     user_template_agent1 = str(prompt_cfg.get("user_template_agent1") or user_template).rstrip()
     user_template_agent2 = str(prompt_cfg.get("user_template_agent2") or user_template).rstrip()
+    user_template = apply_graph_setting(user_template, provide_graph=provide_graph)
+    user_template_agent1 = apply_graph_setting(user_template_agent1, provide_graph=provide_graph)
+    user_template_agent2 = apply_graph_setting(user_template_agent2, provide_graph=provide_graph)
 
     task_cfg = cfg.get("task") or {}
     if not isinstance(task_cfg, dict):
         task_cfg = {}
-    limited_resource = bool(task_cfg.get("limited_resource", False))
-    rpg_kwargs = _rpg_placeholders(cfg)
 
     def _as_block_list(v: Any) -> List[str]:
         if v is None:
@@ -212,8 +128,18 @@ def _build_formatters(cfg: Dict[str, Any], *, num_agents: int, tokenizer: Any | 
         s = str(v).strip()
         return [s] if s else []
 
-    block_agent1_override = _as_block_list(task_cfg.get("block_agent1"))
-    block_agent2_override = _as_block_list(task_cfg.get("block_agent2"))
+    agent1_blocks = _as_block_list(task_cfg.get("block_agent1"))
+    if not agent1_blocks:
+        b0 = str(task_cfg.get("block_even") or "white_concrete").strip()
+        b1 = str(task_cfg.get("block_odd") or "black_concrete").strip()
+        agent1_blocks = [b0, b1]
+
+    agent2_blocks = _as_block_list(task_cfg.get("block_agent2"))
+    if not agent2_blocks:
+        agent2_blocks = [str(task_cfg.get("block_agent2") or "red_concrete").strip() or "red_concrete"]
+
+    block_agent1_lines = "\n".join(f"- {b}" for b in agent1_blocks)
+    block_agent2_lines = "\n".join(f"- {b}" for b in agent2_blocks)
 
     def _prompt_override(item: Dict[str, Any]) -> str | None:
         p = item.get("prompt")
@@ -221,75 +147,24 @@ def _build_formatters(cfg: Dict[str, Any], *, num_agents: int, tokenizer: Any | 
             return p.strip()
         return None
 
-    def _allowed_blocks(item: Dict[str, Any], overrides: List[str]) -> List[str]:
-        if overrides:
-            return unique_block_list(overrides)
-        palette = item.get("palette") or {}
-        if isinstance(palette, dict):
-            return unique_block_list(palette.values())
-        return []
-
-    def _format_resource_limits(task: TaskSpec) -> str:
-        if not limited_resource:
-            return ""
-        limits = compute_resource_limits(task, num_agents=num_agents)
-        if not limits:
-            return ""
-        lines: List[str] = []
-        for _key, block in task.palette.items():
-            block_norm = normalize_block_id(block)
-            if block_norm in ("air", "cave_air", "void_air"):
-                continue
-            limit_val = limits.get(block_norm)
-            if limit_val is None:
-                continue
-            lines.append(f"- {block_norm}: {limit_val}")
-        if not lines:
-            return ""
-        return "Resource limits per agent (air unlimited):\n" + "\n".join(lines)
-
     def _render(item: Dict[str, Any], tmpl: str) -> str:
         override = _prompt_override(item)
         if override is not None:
             return override
-
         w_from = item.get("local_bbox_from") or [0, 0, 0]
         w_to = item.get("local_bbox_to") or [0, 0, 0]
-        palette = item.get("palette") or {}
-        layers_by_y = item.get("layers_by_y") or {}
-
-        task = TaskSpec(
-            task_id=str(item.get("task_id") or ""),
-            local_bbox_from=[int(v) for v in w_from],
-            local_bbox_to=[int(v) for v in w_to],
-            palette={str(k): str(v) for k, v in palette.items()},
-            layers_by_y={int(k): [str(r) for r in v] for k, v in (layers_by_y or {}).items()},
-        )
-
-        layers_text = format_layers_text(task, world_from=w_from, include_air=include_air_rects)
-        legend = legend_lines(task.palette)
-
-        allowed_blocks_agent1 = _allowed_blocks(item, block_agent1_override)
-        allowed_blocks_agent2 = _allowed_blocks(item, block_agent2_override)
-        block_agent1_lines = "\n".join(f"- {b}" for b in allowed_blocks_agent1)
-        block_agent2_lines = "\n".join(f"- {b}" for b in allowed_blocks_agent2)
-
+        target_rows = item.get("target_rows_topdown") or []
+        target_ascii = "" if not provide_graph else "\n".join(str(r) for r in target_rows)
         user = tmpl.format(
             task_id=str(item.get("task_id") or ""),
+            text=str(item.get("string") or ""),
+            difficulty=int(item.get("difficulty") or 0),
             world_bbox_from=json.dumps(w_from, separators=(",", ":")),
             world_bbox_to=json.dumps(w_to, separators=(",", ":")),
-            legend_lines=legend,
-            layers_text=layers_text,
+            target_ascii=target_ascii,
             block_agent1_lines=block_agent1_lines,
             block_agent2_lines=block_agent2_lines,
-            spider_num=rpg_kwargs.get("spider_num"),
-            player_hp=rpg_kwargs.get("player_hp"),
-            spider_atk=rpg_kwargs.get("spider_atk"),
-            spider_dmg=rpg_kwargs.get("spider_dmg"),
         ).rstrip()
-        resource_limits_text = _format_resource_limits(task)
-        if resource_limits_text:
-            user = user + "\n\n" + resource_limits_text
         return _render_prompt(
             tokenizer=tokenizer,
             system_prompt=system_prompt,
@@ -307,11 +182,11 @@ def _build_formatters(cfg: Dict[str, Any], *, num_agents: int, tokenizer: Any | 
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Train box_builder with GRPO (CoMLRL MAGRPOTrainer)")
+    parser = argparse.ArgumentParser(description="Train str_rainbow with GRPO (CoMLRL MAGRPOTrainer num_agents=1)")
     parser.add_argument(
         "--config",
         type=str,
-        default=os.path.join(REPO_ROOT, "box_builder", "configs", "box_builder_config.yaml"),
+        default=os.path.join(REPO_ROOT, "str_rainbow", "configs", "str_rainbow_config.yaml"),
         help="Path to YAML config",
     )
     parser.add_argument("--override", type=str, default=None, help="key.path=value overrides, comma-separated")
@@ -322,50 +197,52 @@ def main() -> int:
         cfg = apply_overrides(cfg, str(args.override))
     apply_prompt_defaults(cfg)
 
-    run_name = str(cfg.get("run_name") or "box_builder_grpo")
-    seed = int(cfg.get("seed", 42))
-    fixed_seed = bool(cfg.get("fixed_seed", True))
-    if not fixed_seed:
+    seed_val = cfg.get("seed", None)
+    if seed_val is None:
         try:
             import secrets
 
             seed = int(secrets.randbits(32))
         except Exception:
             seed = int(time.time()) & 0x7FFFFFFF
+    else:
+        seed = int(seed_val)
 
-    _prepare_rpg_state(cfg, seed)
-
-    collab_cfg = cfg.get("collab") or {}
-    if not isinstance(collab_cfg, dict):
-        collab_cfg = {}
-    num_agents = int(collab_cfg.get("num_agents") or 1)
+    magrpo_cfg = cfg.get("magrpo") or {}
+    if not isinstance(magrpo_cfg, dict):
+        magrpo_cfg = {}
+    num_agents = int(magrpo_cfg.get("num_agents") or 1)
     if num_agents not in (1, 2):
-        raise ValueError("collab.num_agents must be 1 or 2")
+        raise ValueError("magrpo.num_agents must be 1 or 2")
 
-    data_cfg = cfg.get("data") or {}
-    if not isinstance(data_cfg, dict):
-        data_cfg = {}
-    json_path = resolve_path(args.config, data_cfg.get("json_path"))
-    split_ratio = float(data_cfg.get("split_ratio") or 0.8)
+    dataset_cfg = cfg.get("dataset") or {}
+    if not isinstance(dataset_cfg, dict):
+        dataset_cfg = {}
+    csv_path = resolve_path(args.config, dataset_cfg.get("csv_path"))
+    split_ratio = float(dataset_cfg.get("split_ratio") or 0.8)
+    spacing = int(dataset_cfg.get("spacing") or 1)
+    local_z = int(dataset_cfg.get("local_z") or 0)
 
-    tasks = load_tasks_from_json(json_path)
+    tasks = load_tasks_from_csv(csv_path, spacing=spacing, local_z=local_z)
     items: List[Dict[str, Any]] = []
-    for idx, t in enumerate(tasks, start=1):
+    for t in tasks:
         items.append(
             {
                 "task_id": t.task_id,
-                "dataset_index": idx,
+                "csv_row_index": t.csv_row_index,
+                "string": t.text,
+                "difficulty": t.difficulty,
                 "local_bbox_from": t.local_bbox_from,
                 "local_bbox_to": t.local_bbox_to,
-                "palette": t.palette,
-                "layers_by_y": {str(k): [str(r) for r in v] for k, v in t.layers_by_y.items()},
-                "prompt": f"box_builder:{t.task_id}",
+                "target_rows_topdown": t.target_rows_topdown,
+                "prompt": f"str_rainbow:{t.task_id}",
             }
         )
 
     train_items, eval_items = _split_list(items, split_ratio=split_ratio, seed=seed)
     train_ds = Dataset.from_list(train_items)
     eval_ds = Dataset.from_list(eval_items) if eval_items else None
+    tasks_by_prompt = {f"str_rainbow:{t.task_id}": t for t in tasks}
 
     model_cfg = cfg.get("model") or {}
     if not isinstance(model_cfg, dict):
@@ -391,7 +268,7 @@ def main() -> int:
     agents = []
     for _ in range(num_agents):
         agent = AutoModelForCausalLM.from_pretrained(model_name, **model_kwargs)
-        enable_gc = bool(model_cfg.get("gradient_checkpointing", False))
+        enable_gc = bool(model_cfg.get("gradient_checkpointing", True))
         if enable_gc:
             try:
                 if hasattr(agent, "config"):
@@ -407,6 +284,13 @@ def main() -> int:
     magrpo_args = get_trainer_args(cfg)
     formatters = _build_formatters(cfg, num_agents=num_agents, tokenizer=tokenizer)
     reward_func = get_reward_function(cfg=cfg, num_agents=num_agents)
+    eval_logger = partial(
+        mt_str_rainbow_logger,
+        cfg=cfg,
+        num_agents=num_agents,
+        tasks_by_prompt=tasks_by_prompt,
+    )
+    eval_aggregator = aggregate_mt_str_rainbow_metrics
 
     reward_processor = None
     rp_cfg = cfg.get("reward_processor") or {}
@@ -423,24 +307,43 @@ def main() -> int:
                 prev = reward_processor
                 reward_processor = (lambda p=prev, s=shift_proc: (lambda x: s(p(x))))()
 
+    output_cfg = cfg.get("output") or {}
+    if not isinstance(output_cfg, dict):
+        output_cfg = {}
+    external_cfg = cfg.get("external") or {}
+    if not isinstance(external_cfg, dict):
+        external_cfg = {}
+
     wandb_cfg = cfg.get("wandb")
     wandb_config = None
-    if isinstance(wandb_cfg, dict) and wandb_cfg.get("enabled", False):
-        dir_val = wandb_cfg.get("dir") or wandb_cfg.get("output_dir")
+    if isinstance(wandb_cfg, dict) and wandb_cfg.get("enabled", True):
+        dir_val = wandb_cfg.get("dir") or output_cfg.get("base_dir")
         if dir_val:
-            dir_val = expand_jobid_placeholder(str(dir_val))
-        num_turns = 1
+            dir_val = str(dir_val)
+        dataset_type = str(dataset_cfg.get("type") or "str_rainbow")
         try:
-            num_turns = int(getattr(magrpo_args, "num_turns", 1))
+            num_turns_val = int(getattr(magrpo_args, "num_turns", 1))
         except Exception:
-            num_turns = 1
-        turns_suffix = f"_{num_turns}t"
+            num_turns_val = 1
+        tags = wandb_cfg.get(
+            "tags",
+            ["magrpo", dataset_type, f"agents_{num_agents}", f"turns_{num_turns_val}"],
+        )
+        if not isinstance(tags, list):
+            tags = ["magrpo", dataset_type, f"agents_{num_agents}", f"turns_{num_turns_val}"]
         wandb_config = {
-            "project": wandb_cfg.get("project", "box_builder"),
+            "project": wandb_cfg.get("project", "str_rainbow"),
             "entity": wandb_cfg.get("entity", None),
-            "name": f"{run_name}_{num_agents}agents{turns_suffix}",
+            "name": wandb_cfg.get("name", "str_rainbow_magrpo"),
             "dir": dir_val,
-            "tags": ["box_builder", f"agents_{num_agents}", f"turns_{num_turns}"],
+            "tags": tags,
+            "config_sections": {
+                "dataset": dataset_cfg,
+                "model": model_cfg,
+                "output": output_cfg,
+                "external": external_cfg,
+                "trainer": magrpo_cfg,
+            },
         }
         if wandb_config.get("dir"):
             os.environ.setdefault("WANDB_DIR", str(wandb_config["dir"]))
@@ -453,10 +356,6 @@ def main() -> int:
     except Exception:
         is_multi_turn = False
 
-    external_cfg = cfg.get("external") or {}
-    if not isinstance(external_cfg, dict):
-        external_cfg = {}
-
     trainer_kwargs: Dict[str, Any] = {
         "agents": agents,
         "num_agents": num_agents,
@@ -467,7 +366,9 @@ def main() -> int:
         "eval_dataset": eval_ds,
         "tokenizer": tokenizer,
         "wandb_config": wandb_config,
-        "dataset_type": "box_builder",
+        "dataset_type": str(dataset_cfg.get("type") or "str_rainbow"),
+        "eval_logger": eval_logger,
+        "eval_aggregator": eval_aggregator,
     }
     if reward_processor is not None:
         trainer_kwargs["reward_processor"] = reward_processor
@@ -479,18 +380,20 @@ def main() -> int:
         prompt_cfg = cfg.get("prompt") or {}
         if not isinstance(prompt_cfg, dict):
             prompt_cfg = {}
+        provide_graph = bool(prompt_cfg.get("provide_graph", True))
         system_prompt = str(prompt_cfg.get("system") or "").rstrip()
         user_template = str(prompt_cfg.get("user_template") or "").rstrip()
         user_template_agent1 = str(prompt_cfg.get("user_template_agent1") or user_template).rstrip()
         user_template_agent2 = str(prompt_cfg.get("user_template_agent2") or user_template).rstrip()
-        include_air_rects = bool(prompt_cfg.get("include_air_rects", False))
+        user_template = apply_graph_setting(user_template, provide_graph=provide_graph)
+        user_template_agent1 = apply_graph_setting(user_template_agent1, provide_graph=provide_graph)
+        user_template_agent2 = apply_graph_setting(user_template_agent2, provide_graph=provide_graph)
 
         task_cfg = cfg.get("task") or {}
         if not isinstance(task_cfg, dict):
             task_cfg = {}
 
         max_commands_total = int(task_cfg.get("max_commands") or 600)
-        limited_resource = bool(task_cfg.get("limited_resource", False))
 
         def _as_block_list(v: Any) -> List[str]:
             if v is None:
@@ -505,21 +408,21 @@ def main() -> int:
             s = str(v).strip()
             return [s] if s else []
 
-        block_agent1_override = _as_block_list(task_cfg.get("block_agent1"))
-        block_agent2_override = _as_block_list(task_cfg.get("block_agent2"))
+        agent1_blocks = _as_block_list(task_cfg.get("block_agent1"))
+        if not agent1_blocks:
+            b0 = str(task_cfg.get("block_even") or "white_concrete").strip()
+            b1 = str(task_cfg.get("block_odd") or "black_concrete").strip()
+            agent1_blocks = [b0, b1]
+        agent2_blocks = _as_block_list(task_cfg.get("block_agent2"))
+        if not agent2_blocks:
+            agent2_blocks = [str(task_cfg.get("block_agent2") or "red_concrete").strip() or "red_concrete"]
 
-        def _allowed_blocks(item: Dict[str, Any], overrides: List[str]) -> List[str]:
-            if overrides:
-                return unique_block_list(overrides)
-            palette = item.get("palette") or {}
-            if isinstance(palette, dict):
-                return unique_block_list(palette.values())
-            return []
+        block_agent1_lines = "\n".join(f"- {b}" for b in agent1_blocks)
+        block_agent2_lines = "\n".join(f"- {b}" for b in agent2_blocks)
 
-        rpg_kwargs = _rpg_placeholders(cfg)
         context_map: Dict[str, Any] = {}
 
-        def _register_split(ds: Dataset) -> None:
+        def _register_split(ds: Any) -> None:
             if ds is None:
                 return
             try:
@@ -533,74 +436,32 @@ def main() -> int:
                     continue
                 w_from = item.get("local_bbox_from") or [0, 0, 0]
                 w_to = item.get("local_bbox_to") or [0, 0, 0]
-                palette = item.get("palette") or {}
-                layers_by_y = item.get("layers_by_y") or {}
-
-                task = TaskSpec(
-                    task_id=str(item.get("task_id") or ""),
-                    local_bbox_from=[int(v) for v in w_from],
-                    local_bbox_to=[int(v) for v in w_to],
-                    palette={str(k): str(v) for k, v in palette.items()},
-                    layers_by_y={int(k): [str(r) for r in v] for k, v in (layers_by_y or {}).items()},
-                )
-                layers_text = format_layers_text(task, world_from=w_from, include_air=include_air_rects)
-                legend = legend_lines(task.palette)
-                resource_limits = compute_resource_limits(task, num_agents=num_agents) if limited_resource else {}
-                resource_limits_lines: List[str] = []
-                for _key, block in task.palette.items():
-                    block_norm = normalize_block_id(block)
-                    if block_norm in ("air", "cave_air", "void_air"):
-                        continue
-                    limit_val = resource_limits.get(block_norm)
-                    if limit_val is None:
-                        continue
-                    resource_limits_lines.append(f"- {block_norm}: {limit_val}")
-                resource_limits_text = ""
-                if resource_limits_lines:
-                    resource_limits_text = "Resource limits per agent (air unlimited):\n" + "\n".join(resource_limits_lines)
-
-                allowed_blocks_agent1 = _allowed_blocks(item, block_agent1_override)
-                allowed_blocks_agent2 = _allowed_blocks(item, block_agent2_override)
-                block_agent1_lines = "\n".join(f"- {b}" for b in allowed_blocks_agent1)
-                block_agent2_lines = "\n".join(f"- {b}" for b in allowed_blocks_agent2)
-
+                target_rows = item.get("target_rows_topdown") or []
+                target_ascii = "" if not provide_graph else "\n".join(str(r) for r in target_rows)
                 fmt_kwargs = {
                     "task_id": str(item.get("task_id") or ""),
+                    "text": str(item.get("string") or ""),
+                    "difficulty": int(item.get("difficulty") or 0),
                     "world_bbox_from": json.dumps(w_from, separators=(",", ":")),
                     "world_bbox_to": json.dumps(w_to, separators=(",", ":")),
-                    "legend_lines": legend,
-                    "layers_text": layers_text,
+                    "target_ascii": target_ascii,
                     "block_agent1_lines": block_agent1_lines,
                     "block_agent2_lines": block_agent2_lines,
-                    "spider_num": rpg_kwargs.get("spider_num"),
-                    "player_hp": rpg_kwargs.get("player_hp"),
-                    "spider_atk": rpg_kwargs.get("spider_atk"),
-                    "spider_dmg": rpg_kwargs.get("spider_dmg"),
                 }
-                base_user_single = user_template.format(**fmt_kwargs).rstrip()
-                base_user_agent1 = user_template_agent1.format(**fmt_kwargs).rstrip()
-                base_user_agent2 = user_template_agent2.format(**fmt_kwargs).rstrip()
-                if resource_limits_text:
-                    base_user_single = base_user_single + "\n\n" + resource_limits_text
-                    base_user_agent1 = base_user_agent1 + "\n\n" + resource_limits_text
-                    base_user_agent2 = base_user_agent2 + "\n\n" + resource_limits_text
-
                 payload = {
                     "system_prompt": system_prompt,
-                    "user_prompt_single": base_user_single,
-                    "user_prompt_agent1": base_user_agent1,
-                    "user_prompt_agent2": base_user_agent2,
+                    "user_prompt_single": user_template.format(**fmt_kwargs).rstrip(),
+                    "user_prompt_agent1": user_template_agent1.format(**fmt_kwargs).rstrip(),
+                    "user_prompt_agent2": user_template_agent2.format(**fmt_kwargs).rstrip(),
                     "task_id": str(item.get("task_id") or ""),
+                    "text": str(item.get("string") or ""),
+                    "difficulty": int(item.get("difficulty") or 0),
                     "local_bbox_from": [int(v) for v in (w_from or [0, 0, 0])],
                     "local_bbox_to": [int(v) for v in (w_to or [0, 0, 0])],
-                    "palette": {str(k): str(v) for k, v in (palette or {}).items()},
-                    "layers_by_y": {str(k): [str(r) for r in v] for k, v in (layers_by_y or {}).items()},
-                    "allowed_blocks_agent1": list(allowed_blocks_agent1),
-                    "allowed_blocks_agent2": list(allowed_blocks_agent2),
+                    "target_rows_topdown": [str(r) for r in target_rows],
+                    "allowed_blocks_agent1": list(agent1_blocks),
+                    "allowed_blocks_agent2": list(agent2_blocks),
                     "max_commands_total": max_commands_total,
-                    "limited_resource": limited_resource,
-                    "resource_limits_text": resource_limits_text,
-                    "rpg_state": cfg.get("_rpg_state"),
                 }
 
                 ds_key = _normalize_key(str(item.get("prompt") or ""))
@@ -627,11 +488,6 @@ def main() -> int:
         external_mode = str(external_cfg.get("mode") or "perfect_feedback")
         original_prompt_flag = bool(external_cfg.get("original_prompt", True))
         previous_response_flag = bool(external_cfg.get("previous_response", False))
-        modification_limit = external_cfg.get("lim")
-        if modification_limit is None:
-            modification_limit = external_cfg.get("modification_limit")
-        common_prefix = external_cfg.get("common_prefix")
-        common_suffix = external_cfg.get("common_suffix")
 
         num_agents_default = int(num_agents)
 
@@ -642,11 +498,8 @@ def main() -> int:
                 agent_completions=agent_completions,
                 num_agents=n_agents,
                 mode=external_mode,
-                limit=modification_limit,
                 original_prompt=original_prompt_flag,
                 previous_response=previous_response_flag,
-                common_prefix=common_prefix,
-                common_suffix=common_suffix,
                 prompt_history_per_agent=_kwargs.get("prompt_history_per_agent"),
                 response_history_per_agent=_kwargs.get("response_history_per_agent"),
             )
@@ -656,11 +509,10 @@ def main() -> int:
     trainer = MAGRPOTrainer(**trainer_kwargs)
     trainer.train()
 
-    out_cfg = cfg.get("output") or {}
-    if bool(out_cfg.get("save_final_model", False)):
-        save_path_cfg = out_cfg.get("save_path")
+    if bool(output_cfg.get("save_final_model", False)):
+        save_path_cfg = output_cfg.get("save_path")
         if save_path_cfg:
-            save_path = expand_jobid_placeholder(str(save_path_cfg))
+            save_path = str(save_path_cfg)
         else:
             save_path = os.path.join(os.path.abspath(magrpo_args.output_dir), "final_model")
         trainer.save_model(save_path)

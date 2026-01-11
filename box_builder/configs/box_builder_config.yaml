@@ -1,29 +1,81 @@
-run_name: box_builder_grpo
+model:
+  name: Qwen/Qwen2.5-3B-Instruct
+  type: qwen
+  temperature: 0.618
+  top_p: 0.95
+  max_length: 2048
+  tokenizer_kwargs: {}
+  model_kwargs:
+    trust_remote_code: true
+    device_map: auto
+    low_cpu_mem_usage: true
+    attn_implementation: sdpa
+  dtype: bf16
+  gradient_checkpointing: false
 
-# When fixed_seed=false, a random seed is chosen at runtime.
-fixed_seed: false
-seed: 42
-
-collab:
-  # GRPO = num_agents=1. (CoMLRL's MAGRPOTrainer supports num_agents>=1.)
-  num_agents: 2
-
-data:
-  # Path is resolved relative to this config file.
+dataset:
+  name: box_builder
+  type: box_builder
   json_path: ../../dataset/box_builder/one2.json
   split_ratio: 0.8
 
+output:
+  base_dir: output
+  save_final_model: false
+  save_path: output/final_model
+  verbose: false
+
+external:
+  mode: score_feedback
+  original_prompt: true
+  previous_response: true
+  lim: 20
+  common_prefix: null
+  common_suffix: Do not output any text other than commands.
+
+magrpo:
+  num_turns: 2
+  num_train_epochs: 100
+  per_device_train_batch_size: 1
+  rollout_buffer_size: 2
+  learning_rate: 1e-5
+  eval_interval: 10
+  eval_num_samples: 4
+  num_generations: 3
+  max_new_tokens: 512
+  temperature: 0.618
+  top_p: 0.95
+  top_k: null
+  joint_mode: aligned
+  num_agents: 2
+  discount: 0.9
+  termination_threshold: 0.0
+  logging_steps: 20
+  save_steps: 200
+  normalize_advantage: false
+  epsilon_clip: null
+
+reward_processor:
+  enabled: true
+  scale_factor: 1.0
+  shift: -1.0
+
+wandb:
+  project: box_builder
+  entity: OpenMLRL
+  name: box_builder_magrpo
+  dir: output
+  tags: ["magrpo", "box_builder"]
+
+prompt:
+  use_chat_template: true
+
 task:
-  # Allowed blocks for agent1 (and single-agent). Empty = use dataset palette.
   block_agent1: []
-  # Allowed blocks for agent2 (only used when collab.num_agents=2).
   block_agent2: []
-  # Cap accepted commands per agent (extra commands are rejected for reward).
   max_commands: 600
-  # Enable per-agent resource limits based on target block counts.
   limited_resource: true
 
-# RPG-style safety context shown in prompts and used for reward shaping.
 RPG:
   player:
     hp: 5
@@ -32,93 +84,14 @@ RPG:
     atk_low: 1
     atk_high: 3
 
-# Prompt templates are defined in utils/prompting.py; override here if needed.
-prompt:
-  # Use tokenizer.apply_chat_template when available.
-  use_chat_template: true
-
-external:
-  # Only used when trainer.num_turns > 1.
-  mode: score_feedback
-  # Include the original (turn-1) prompt in external feedback.
-  original_prompt: true
-  # Optionally include previous commands verbatim (usually keep false).
-  previous_response: true
-  # Max number of wrong positions to suggest in modification mode.
-  lim: 20
-  # Optional common prefix/suffix for all external feedback prompts.
-  common_prefix: null
-  common_suffix: "Do not output any text other than commands."
-
-model:
-  name: Qwen/Qwen2.5-3B-Instruct
-  # name: Qwen/Qwen3-4B-Instruct-2507
-  tokenizer_kwargs: {}
-  model_kwargs:
-    trust_remote_code: true
-    device_map: auto
-    low_cpu_mem_usage: true
-    attn_implementation: sdpa
-  # dtype: bf16 | fp16 | fp32 | auto
-  dtype: bf16
-  gradient_checkpointing: false
-
-trainer:
-  # Set by scripts (supports [jobid] placeholder).
-  output_dir: TODO
-  num_train_epochs: 100
-  per_device_train_batch_size: 1
-  # Number of node samples to buffer before an update (comlrl rollout buffer size).
-  rollout_buffer_size: 2
-  learning_rate: 1e-5
-  logging_steps: 20
-  save_steps: 200
-  num_generations: 3
-  max_new_tokens: 512
-  temperature: 0.618
-  top_p: 0.95
-  # Set >1 to enable multi-turn training with external feedback prompts.
-  num_turns: 2
-  # Disable early branch termination (comlrl default -0.2 would stop after turn 1 on positive rewards).
-  termination_threshold: null
-  # Discount factor for multi-turn returns.
-  discount: 0.9
-  # comlrl MAGRPOConfig.joint_mode: aligned (index-aligned) | cross (Cartesian product)
-  joint_mode: aligned
-  # normalize_advantage: true
-  # epsilon_clip: 12
-
 debug:
-  # Prints an ASCII overlay per reward call:
-  # - placed blocks are shown as the first letter of the block color (W/B/R/...)
-  # - missing target blocks are shown as '#'
   enabled: true
   max_prints: 2000
-  # If >0, print every N reward calls (in addition to max_prints cap).
   every_n_calls: 11
-  # Character for empty cells in the debug render.
   empty_char: "."
-  # Print raw agent completions when true.
   raw_output: true
-
-reward_processor:
-  enabled: false
-  scale_factor: 1.0
-  shift: null
 
 patches:
   generation_memory: true
   single_agent_returns: true
   force_sampling: true
-
-wandb:
-  enabled: true
-  project: box_builder
-  entity: null
-  # Set by scripts (supports [jobid] placeholder).
-  output_dir: TODO
-
-output:
-  save_final_model: false
-  # Set by scripts (supports [jobid] placeholder).
-  save_path: TODO

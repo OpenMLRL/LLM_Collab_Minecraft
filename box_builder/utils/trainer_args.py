@@ -6,8 +6,6 @@ import os
 
 from comlrl.trainers.magrpo import MAGRPOConfig  # type: ignore
 
-from LLM_Collab_MC.box_builder.utils.config import expand_jobid_placeholder
-
 
 def _as_int(x: Any, default: int) -> int:
     if x is None or isinstance(x, bool):
@@ -57,13 +55,30 @@ def _as_opt_float(x: Any, default: Optional[float]) -> Optional[float]:
     return default
 
 
+def _as_opt_int(x: Any, default: Optional[int]) -> Optional[int]:
+    if x is None or isinstance(x, bool):
+        return default
+    if isinstance(x, (int, float)):
+        return int(x)
+    if isinstance(x, str):
+        s = x.strip().lower()
+        if s in ("none", "null", ""):
+            return None
+        try:
+            return int(float(s))
+        except Exception:
+            return default
+    return default
+
+
 def get_trainer_args(cfg: Dict[str, Any]) -> MAGRPOConfig:
-    tr = cfg.get("trainer") or {}
+    tr = cfg.get("magrpo") or {}
     if not isinstance(tr, dict):
         tr = {}
 
-    output_dir_cfg = tr.get("output_dir", os.path.join(os.getcwd(), "runs"))
-    output_dir_resolved = expand_jobid_placeholder(str(output_dir_cfg))
+    output_cfg = cfg.get("output", {}) or {}
+    output_dir_cfg = tr.get("output_dir", output_cfg.get("base_dir", os.path.join(os.getcwd(), "output")))
+    output_dir_resolved = str(output_dir_cfg)
 
     lr_val = tr.get("learning_rate", tr.get("lr", 3e-5))
 
@@ -82,6 +97,8 @@ def get_trainer_args(cfg: Dict[str, Any]) -> MAGRPOConfig:
         "learning_rate": _as_float(lr_val, 3e-5),
         "logging_steps": _as_int(tr.get("logging_steps", 50), 50),
         "save_steps": _as_int(tr.get("save_steps", 200), 200),
+        "eval_interval": _as_int(tr.get("eval_interval", 16), 16),
+        "eval_num_samples": _as_int(tr.get("eval_num_samples", 4), 4),
         "num_generations": _as_int(tr.get("num_generations", 4), 4),
         "max_new_tokens": _as_int(tr.get("max_new_tokens", 512), 512),
         "temperature": _as_float(tr.get("temperature", 0.2), 0.2),
@@ -89,10 +106,13 @@ def get_trainer_args(cfg: Dict[str, Any]) -> MAGRPOConfig:
         "num_turns": _as_int(tr.get("num_turns", 1), 1),
         "joint_mode": joint_mode_str,
         "discount": _as_float(tr.get("discount", tr.get("gamma", 0.9)), 0.9),
-        "termination_threshold": _as_opt_float(tr.get("termination_threshold", None), None),
         "normalize_advantage": bool(tr.get("normalize_advantage", False)),
         "epsilon_clip": _as_opt_float(tr.get("epsilon_clip", None), None),
     }
+    if "top_k" in tr:
+        candidate["top_k"] = _as_opt_int(tr.get("top_k", None), None)
+    if "termination_threshold" in tr:
+        candidate["termination_threshold"] = _as_opt_float(tr.get("termination_threshold", None), None)
 
     try:
         params = set(inspect.signature(MAGRPOConfig.__init__).parameters.keys())
