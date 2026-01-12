@@ -40,7 +40,7 @@ magrpo:
   learning_rate: 5e-6
   eval_interval: 0
   eval_num_samples: 0
-  num_generations: 4
+  num_generations: 3
   max_new_tokens: 512
   temperature: 0.6
   top_p: 0.95
