@@ -23,7 +23,7 @@ def _log_train_iou(iou: float, *, turn_idx: int | None) -> None:
         run = getattr(wandb, "run", None)
         if run is None:
             return
-        key = f"train/turn_{int(turn_idx)}/iou" if turn_idx else "train/iou"
+        key = f"turn_{int(turn_idx)}/iou" if turn_idx else "turn_1/iou"
         wandb.log({key: float(iou)}, commit=False)
     except Exception:
         return
