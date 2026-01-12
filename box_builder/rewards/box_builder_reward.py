@@ -8,7 +8,6 @@ from LLM_Collab_MC.box_builder.utils.box_builder import (
     build_expected_map,
     compute_resource_limits,
     extract_command_lines,
-    load_tasks_from_json,
     normalize_block_id,
     score_box_builder,
     simulate_commands_to_scan_blocks,

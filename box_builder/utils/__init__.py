@@ -1,9 +1,8 @@
-from .config import apply_overrides, expand_jobid_placeholder, load_yaml, resolve_path
+from .config import apply_overrides, load_yaml, resolve_path
 from .box_builder import TaskSpec, load_tasks_from_json
 
 __all__ = [
     "apply_overrides",
-    "expand_jobid_placeholder",
     "load_yaml",
     "resolve_path",
     "TaskSpec",

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import os
-import time
 from pathlib import Path
 from typing import Any, Dict
 
@@ -59,18 +57,4 @@ def resolve_path(config_path: str, maybe_rel: Any) -> str:
     base = Path(config_path).expanduser().resolve().parent
     return str((base / path).resolve())
 
-
-def resolve_job_id() -> str:
-    jid = os.environ.get("SLURM_JOB_ID") or os.environ.get("JOB_ID")
-    if jid:
-        return str(jid)
-    return time.strftime("nojid-%Y%m%d-%H%M%S")
-
-
-def expand_jobid_placeholder(path: str) -> str:
-    if not isinstance(path, str) or not path:
-        return path
-    if "[jobid]" in path:
-        return path.replace("[jobid]", resolve_job_id())
-    return path
 
