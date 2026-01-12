@@ -184,12 +184,27 @@ def main() -> int:
         default=os.path.join(REPO_ROOT, "str_rainbow", "configs", "str_rainbow_config.yaml"),
         help="Path to YAML config",
     )
-    parser.add_argument("--override", type=str, default=None, help="key.path=value overrides, comma-separated")
+    parser.add_argument(
+        "--override",
+        type=str,
+        nargs="*",
+        default=None,
+        help="key.path=value overrides (space or comma-separated)",
+    )
     args = parser.parse_args()
 
     cfg = load_yaml(args.config)
+    override_items: List[str] = []
     if args.override:
-        cfg = apply_overrides(cfg, str(args.override))
+        for item in args.override:
+            if item is None:
+                continue
+            for part in str(item).split(","):
+                part = part.strip()
+                if part:
+                    override_items.append(part)
+    if override_items:
+        cfg = apply_overrides(cfg, ",".join(override_items))
     apply_prompt_defaults(cfg)
 
     seed_val = cfg.get("seed", None)
