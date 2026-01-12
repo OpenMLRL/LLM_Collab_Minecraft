@@ -2,7 +2,7 @@ model:
   name: Qwen/Qwen3-4B-Instruct-2507
   type: qwen
   temperature: 0.6
-  top_p: 0.95
+  top_p: 0.6
   max_length: 2048
   tokenizer_kwargs: {}
   model_kwargs:
@@ -16,7 +16,7 @@ model:
 dataset:
   name: str_rainbow
   type: str_rainbow
-  csv_path: ../../dataset/str_builder/one.csv
+  csv_path: ../../dataset/str_builder/data.csv
   split_ratio: 0.8
   spacing: 2
   local_z: 0
@@ -33,22 +33,22 @@ external:
   previous_response: false
 
 magrpo:
-  num_turns: 4
-  num_train_epochs: 200
+  num_turns: 3
+  num_train_epochs: 16
   per_device_train_batch_size: 1
   rollout_buffer_size: 1
   learning_rate: 5e-6
   eval_interval: 0
   eval_num_samples: 0
-  num_generations: 2
+  num_generations: 3
   max_new_tokens: 512
   temperature: 0.6
-  top_p: 0.95
+  top_p: 0.6
   top_k: null
   joint_mode: aligned
   num_agents: 2
   discount: 0.9
-  termination_threshold: -0.2
+  termination_threshold: -0.1
   logging_steps: 1
   save_steps: 200
   normalize_advantage: false

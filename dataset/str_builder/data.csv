@@ -1,7 +1,11 @@
 string,difficulty
 "I",1
 "C",1
+"M",1
+"L",1
 "MC",2
-"LL",2
+"CM",2
+"LI",3
 "LLM",3
 "ICML",3
+"CLIM",3
