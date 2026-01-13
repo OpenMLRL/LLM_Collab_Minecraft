@@ -90,11 +90,16 @@ def get_reward_function(*, cfg: Dict[str, Any], num_agents: int) -> Callable[...
     if num_agents >= 2:
         allowed_blocks_per_agent.append(allowed_blocks_agent2)
 
+    output_cfg = cfg.get("output") or {}
+    if not isinstance(output_cfg, dict):
+        output_cfg = {}
+    output_verbose = bool(output_cfg.get("verbose", False))
+
     debug_cfg = cfg.get("debug") or {}
     if not isinstance(debug_cfg, dict):
         debug_cfg = {}
 
-    debug_enabled = bool(debug_cfg.get("enabled", False)) or (os.environ.get("STR_RAINBOW_DEBUG_ASCII") == "1")
+    debug_enabled = (bool(debug_cfg.get("enabled", False)) or (os.environ.get("STR_RAINBOW_DEBUG_ASCII") == "1")) and output_verbose
     debug_max_prints = _as_int(debug_cfg.get("max_prints"), 0)
     if debug_enabled and debug_max_prints <= 0:
         debug_max_prints = 10

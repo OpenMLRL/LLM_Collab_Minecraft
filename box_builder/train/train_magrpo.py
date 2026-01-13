@@ -443,6 +443,7 @@ def main() -> int:
     output_cfg = cfg.get("output") or {}
     if not isinstance(output_cfg, dict):
         output_cfg = {}
+    output_verbose = bool(output_cfg.get("verbose", False))
     external_cfg = cfg.get("external") or {}
     if not isinstance(external_cfg, dict):
         external_cfg = {}
@@ -481,6 +482,13 @@ def main() -> int:
         }
         if wandb_config.get("dir"):
             os.environ.setdefault("WANDB_DIR", str(wandb_config["dir"]))
+
+    try:
+        import LLM_Collab_MC.box_builder.external as external_mod  # type: ignore
+
+        external_mod.VERBOSE = bool(output_verbose)
+    except Exception:
+        pass
 
     apply_default_patches(cfg)
 
@@ -687,6 +695,10 @@ def main() -> int:
         trainer_kwargs["external_transition"] = external_transition_wrapper
 
     trainer = MAGRPOTrainer(**trainer_kwargs)
+    try:
+        trainer.verbose = bool(output_verbose)
+    except Exception:
+        pass
     trainer.train()
 
     if bool(output_cfg.get("save_final_model", False)):
