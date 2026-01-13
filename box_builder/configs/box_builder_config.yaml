@@ -2,7 +2,7 @@ model:
   name: Qwen/Qwen2.5-3B-Instruct
   type: qwen
   temperature: 0.618
-  top_p: 0.95
+  top_p: 0.6
   max_length: 2048
   tokenizer_kwargs: {}
   model_kwargs:
@@ -17,7 +17,7 @@ dataset:
   name: box_builder
   type: box_builder
   json_path: ../../dataset/box_builder/one2.json
-  split_ratio: 0.8
+  train_split: "[:]"
 
 output:
   base_dir: output
@@ -44,7 +44,7 @@ magrpo:
   num_generations: 3
   max_new_tokens: 512
   temperature: 0.618
-  top_p: 0.95
+  top_p: 0.6
   top_k: null
   joint_mode: aligned
   num_agents: 2
@@ -63,7 +63,7 @@ reward_processor:
 wandb:
   project: box_builder
   entity: OpenMLRL
-  name: box_builder_magrpo
+  run_name: box_builder_magrpo
   dir: output
   tags: ["magrpo", "box_builder"]
 

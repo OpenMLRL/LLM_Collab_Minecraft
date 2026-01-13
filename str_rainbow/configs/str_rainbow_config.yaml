@@ -17,7 +17,7 @@ dataset:
   name: str_rainbow
   type: str_rainbow
   csv_path: ../../dataset/str_builder/data.csv
-  split_ratio: 0.8
+  train_split: "[:]"
   spacing: 2
   local_z: 0
 
@@ -62,7 +62,7 @@ reward_processor:
 wandb:
   project: str_rainbow
   entity: OpenMLRL
-  name: str_rainbow_magrpo
+  run_name: str_rainbow_magrpo
   dir: output
   tags: ["magrpo", "str_rainbow"]
 

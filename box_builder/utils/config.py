@@ -25,9 +25,6 @@ def apply_overrides(cfg: Dict[str, Any], override: str) -> Dict[str, Any]:
         if not k:
             continue
 
-        if k == "wandb.run_name":
-            k = "wandb.name"
-
         if v.lower() in ("true", "false"):
             vv: Any = v.lower() == "true"
         elif v.lower() in ("none", "null"):
@@ -68,4 +65,3 @@ def resolve_path(config_path: str, maybe_rel: Any) -> str:
         return str(path.resolve())
     base = Path(config_path).expanduser().resolve().parent
     return str((base / path).resolve())
-

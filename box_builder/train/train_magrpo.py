@@ -4,9 +4,10 @@ import argparse
 import json
 import os
 import random
+import re
 import sys
 import time
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List
 
 try:
     import yaml  # type: ignore
@@ -44,21 +45,22 @@ from LLM_Collab_MC.box_builder.utils.prompting import apply_prompt_defaults
 from LLM_Collab_MC.box_builder.utils.trainer_args import get_trainer_args
 
 
-def _split_list(items: List[Dict[str, Any]], split_ratio: float, seed: int) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-    if not items:
-        return [], []
-    r = max(0.0, min(1.0, float(split_ratio)))
-    n_train = int(round(len(items) * r))
-    n_train = max(1, min(len(items) - 1, n_train)) if len(items) >= 2 else len(items)
-    import random
-
-    rng = random.Random(int(seed))
-    idxs = list(range(len(items)))
-    rng.shuffle(idxs)
-    train_idxs = set(idxs[:n_train])
-    train = [items[i] for i in range(len(items)) if i in train_idxs]
-    eval_ = [items[i] for i in range(len(items)) if i not in train_idxs]
-    return train, eval_
+def _slice_items(items: List[Dict[str, Any]], split_expr: Any) -> List[Dict[str, Any]]:
+    if not split_expr:
+        return items
+    s = str(split_expr).strip()
+    if not s:
+        return items
+    m = re.search(r"\[\s*(?P<start>-?\d*)\s*:\s*(?P<end>-?\d*)\s*\]", s)
+    if not m and ":" in s:
+        m = re.match(r"\s*(?P<start>-?\d*)\s*:\s*(?P<end>-?\d*)\s*$", s)
+    if not m:
+        return items
+    start_raw = m.group("start")
+    end_raw = m.group("end")
+    start = int(start_raw) if start_raw not in (None, "", "+") else None
+    end = int(end_raw) if end_raw not in (None, "", "+") else None
+    return items[slice(start, end)]
 
 
 def _map_dtype(dtype_cfg: Any) -> Any:
@@ -360,8 +362,6 @@ def main() -> int:
     if not isinstance(dataset_cfg, dict):
         dataset_cfg = {}
     json_path = resolve_path(args.config, dataset_cfg.get("json_path"))
-    split_ratio = float(dataset_cfg.get("split_ratio") or 0.8)
-
     tasks = load_tasks_from_json(json_path)
     items: List[Dict[str, Any]] = []
     for idx, t in enumerate(tasks, start=1):
@@ -377,7 +377,10 @@ def main() -> int:
             }
         )
 
-    train_items, eval_items = _split_list(items, split_ratio=split_ratio, seed=seed)
+    train_split = dataset_cfg.get("train_split", "[:]")
+    eval_split = dataset_cfg.get("eval_split")
+    train_items = _slice_items(items, train_split)
+    eval_items = _slice_items(items, eval_split) if eval_split else []
     train_ds = Dataset.from_list(train_items)
     eval_ds = Dataset.from_list(eval_items) if eval_items else None
 
@@ -461,10 +464,11 @@ def main() -> int:
         )
         if not isinstance(tags, list):
             tags = ["magrpo", dataset_type, f"agents_{num_agents}", f"turns_{num_turns_val}"]
+        run_name = wandb_cfg.get("run_name") or "box_builder_magrpo"
         wandb_config = {
             "project": wandb_cfg.get("project", "box_builder"),
             "entity": wandb_cfg.get("entity", None),
-            "name": wandb_cfg.get("name", "box_builder_magrpo"),
+            "name": run_name,
             "dir": dir_val,
             "tags": tags,
             "config_sections": {
