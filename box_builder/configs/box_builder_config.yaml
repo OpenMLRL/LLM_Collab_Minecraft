@@ -1,5 +1,5 @@
 model:
-  name: Qwen/Qwen2.5-3B-Instruct
+  name: Qwen/Qwen3-4B-Instruct-2507
   type: qwen
   temperature: 0.618
   top_p: 0.6
@@ -16,7 +16,7 @@ model:
 dataset:
   name: box_builder
   type: box_builder
-  json_path: ../../dataset/box_builder/one2.json
+  json_path: ../../dataset/box_builder/data.json
   train_split: "[:]"
 
 output:
@@ -34,14 +34,14 @@ external:
   common_suffix: Do not output any text other than commands.
 
 magrpo:
-  num_turns: 3
-  num_train_epochs: 200
+  num_turns: 4
+  num_train_epochs: 20
   per_device_train_batch_size: 1
   rollout_buffer_size: 1
   learning_rate: 1e-5
   eval_interval: 0
   eval_num_samples: 0
-  num_generations: 3
+  num_generations: 2
   max_new_tokens: 512
   temperature: 0.618
   top_p: 0.6

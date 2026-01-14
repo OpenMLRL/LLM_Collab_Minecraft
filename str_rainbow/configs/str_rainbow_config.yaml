@@ -33,14 +33,14 @@ external:
   previous_response: false
 
 magrpo:
-  num_turns: 3
+  num_turns: 4
   num_train_epochs: 20
   per_device_train_batch_size: 1
   rollout_buffer_size: 1
   learning_rate: 5e-6
   eval_interval: 0
   eval_num_samples: 0
-  num_generations: 3
+  num_generations: 2
   max_new_tokens: 512
   temperature: 0.6
   top_p: 0.6
