@@ -49,7 +49,7 @@ magrpo:
   joint_mode: aligned
   num_agents: 2
   discount: 0.9
-  termination_threshold: 0.0
+  termination_threshold: -0.1
   logging_steps: 20
   save_steps: 200
   normalize_advantage: false
