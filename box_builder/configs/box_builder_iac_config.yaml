@@ -1,0 +1,96 @@
+model:
+  name: Qwen/Qwen2.5-3B-Instruct
+  type: qwen
+  temperature: 0.618
+  top_p: 0.6
+  max_length: 2048
+  tokenizer_kwargs: {}
+  model_kwargs:
+    trust_remote_code: true
+    device_map: auto
+    low_cpu_mem_usage: true
+    attn_implementation: sdpa
+  dtype: bf16
+  gradient_checkpointing: false
+
+dataset:
+  name: box_builder
+  type: box_builder
+  json_path: ../../dataset/box_builder/one2.json
+  train_split: "[:]"
+
+output:
+  base_dir: output
+  save_final_model: false
+  save_path: output/final_model
+  verbose: false
+
+external:
+  mode: score_feedback
+  original_prompt: true
+  previous_response: true
+  lim: 20
+  common_prefix: null
+  common_suffix: Do not output any text other than commands.
+
+iac:
+  num_turns: 3
+  num_train_epochs: 200
+  per_device_train_batch_size: 1
+  actor_learning_rate: 1e-5
+  critic_learning_rate: 1e-5
+  value_loss_coef: 0.6
+  rollout_buffer_size: 1
+  max_new_tokens: 512
+  temperature: 0.618
+  top_p: 0.6
+  top_k: null
+  num_agents: 2
+  use_separate_critic: true
+  critic_model: null
+  discount: 0.9
+  early_termination_threshold: 0.0
+  eval_interval: 0
+  eval_num_samples: 1
+  logging_steps: 20
+
+reward_processor:
+  enabled: true
+  scale_factor: 1.0
+  shift: -1.0
+
+wandb:
+  project: box_builder
+  entity: OpenMLRL
+  run_name: box_builder_iac
+  dir: output
+  tags: ["iac", "box_builder"]
+
+prompt:
+  use_chat_template: true
+
+task:
+  block_agent1: []
+  block_agent2: []
+  max_commands: 600
+  limited_resource: true
+
+RPG:
+  player:
+    hp: 5
+  spider:
+    num: 3
+    atk_low: 1
+    atk_high: 3
+
+debug:
+  enabled: true
+  max_prints: 2000
+  every_n_calls: 11
+  empty_char: "."
+  raw_output: true
+
+patches:
+  generation_memory: true
+  single_agent_returns: true
+  force_sampling: true
