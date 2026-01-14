@@ -427,28 +427,8 @@ def main() -> int:
         mapped["_box_builder_turn"] = int(turn_idx)
         prompt_to_item[key] = mapped
 
-    def _register_dataset_prompts(items_list: List[Dict[str, Any]], turn_idx: int) -> None:
-        for item in items_list:
-            ds_key = _normalize_key(str(item.get("prompt") or ""))
-            if ds_key and ds_key not in dataset_prompt_map:
-                dataset_prompt_map[ds_key] = dict(item)
-            layers_key = _layers_key_from_item(item)
-            if layers_key and layers_key not in layers_key_map:
-                layers_key_map[layers_key] = dict(item)
-            for fmt in formatters:
-                try:
-                    prompt = fmt(item)
-                except Exception:
-                    prompt = ""
-                if prompt:
-                    _register_prompt(prompt, item, turn_idx)
-
-    _register_dataset_prompts(train_items, 1)
-    if eval_items:
-        _register_dataset_prompts(eval_items, 1)
-
     _layers_re = re.compile(
-        r"Layers \\(ascending WORLD y\\).*?\\n- Format:.*?\\n(.*?)\\n\\s*WORLD bbox \\(inclusive\\):",
+        r"Layers \(ascending WORLD y\).*?\n- Format:.*?\n(.*?)\n\s*WORLD bbox \(inclusive\):",
         re.DOTALL,
     )
 
@@ -481,13 +461,33 @@ def main() -> int:
     def _extract_turn_idx(prompt: str) -> int | None:
         if not prompt:
             return None
-        match = re.search(r"\\bTurn\\s*:\\s*(\\d+)\\b", prompt)
+        match = re.search(r"\bTurn\s*:\s*(\d+)\b", prompt)
         if not match:
             return None
         try:
             return int(match.group(1))
         except Exception:
             return None
+
+    def _register_dataset_prompts(items_list: List[Dict[str, Any]], turn_idx: int) -> None:
+        for item in items_list:
+            ds_key = _normalize_key(str(item.get("prompt") or ""))
+            if ds_key and ds_key not in dataset_prompt_map:
+                dataset_prompt_map[ds_key] = dict(item)
+            layers_key = _layers_key_from_item(item)
+            if layers_key and layers_key not in layers_key_map:
+                layers_key_map[layers_key] = dict(item)
+            for fmt in formatters:
+                try:
+                    prompt = fmt(item)
+                except Exception:
+                    prompt = ""
+                if prompt:
+                    _register_prompt(prompt, item, turn_idx)
+
+    _register_dataset_prompts(train_items, 1)
+    if eval_items:
+        _register_dataset_prompts(eval_items, 1)
 
     def _lookup_item(prompts: List[str]) -> Dict[str, Any]:
         for p in prompts or []:
