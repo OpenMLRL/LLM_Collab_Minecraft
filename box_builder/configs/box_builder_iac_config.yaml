@@ -52,7 +52,7 @@ iac:
   early_termination_threshold: 0.0
   eval_interval: 0
   eval_num_samples: 1
-  logging_steps: 20
+  logging_steps: 40
 
 reward_processor:
   enabled: true
