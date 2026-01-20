@@ -40,6 +40,7 @@ iac:
   actor_learning_rate: 5e-6
   critic_learning_rate: 5e-6
   value_loss_coef: 0.6
+  value_clip_range: 0.05
   rollout_buffer_size: 1
   max_new_tokens: 512
   temperature: 0.6

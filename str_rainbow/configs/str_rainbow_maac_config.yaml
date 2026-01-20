@@ -30,7 +30,7 @@ output:
 external:
   mode: position_feedback
   original_prompt: true
-  previous_response: false
+  previous_response: true
 
 maac:
   num_turns: 4
