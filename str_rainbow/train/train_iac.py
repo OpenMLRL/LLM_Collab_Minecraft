@@ -379,7 +379,7 @@ def main() -> int:
         run_name = (
             wandb_cfg.get("name")
             or wandb_cfg.get("run_name")
-            or "str_rainbow_iac"
+            or f"{dataset_type}-iac"
         )
         wandb_config = {
             "project": wandb_cfg.get("project", "str_rainbow"),

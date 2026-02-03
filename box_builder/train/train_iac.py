@@ -564,7 +564,7 @@ def main() -> int:
         run_name = (
             wandb_cfg.get("name")
             or wandb_cfg.get("run_name")
-            or "box_builder_iac"
+            or f"{dataset_type}-iac"
         )
         wandb_config = {
             "project": wandb_cfg.get("project", "box_builder"),

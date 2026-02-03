@@ -336,7 +336,7 @@ def main() -> int:
         run_name = (
             wandb_cfg.get("name")
             or wandb_cfg.get("run_name")
-            or "str_rainbow_magrpo"
+            or f"{dataset_type}-magrpo"
         )
         wandb_config = {
             "project": wandb_cfg.get("project", "str_rainbow"),
