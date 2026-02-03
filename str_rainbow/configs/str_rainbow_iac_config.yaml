@@ -33,7 +33,9 @@ external:
   previous_response: true
 
 iac:
+  num_agents: 2
   num_turns: 4
+  critic_model: null
   num_train_epochs: 150
   actor_learning_rate: 2.5e-6
   critic_learning_rate: 2.5e-6
@@ -44,13 +46,12 @@ iac:
   temperature: 0.6
   top_p: 0.6
   top_k: null
-  num_agents: 2
   use_separate_critic: true
-  critic_model: null
   discount: 0.9
   early_termination_threshold: -0.1
   eval_interval: 0
   eval_num_samples: 1
+  eval_batch_size: 1
   logging_steps: 20
 
 reward_processor:

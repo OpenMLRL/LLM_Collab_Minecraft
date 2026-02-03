@@ -34,25 +34,23 @@ external:
   common_suffix: Do not output any text other than commands.
 
 magrpo:
+  num_agents: 2
   num_turns: 4
   num_train_epochs: 20
   learning_rate: 1e-5
   logging_steps: 5
-  save_steps: 200
   num_generations: 2
   max_new_tokens: 512
   temperature: 0.6
   top_p: 0.6
   top_k: null
-  num_agents: 2
   discount: 0.9
   joint_mode: aligned
   termination_threshold: -0.1
   rollout_buffer_size: 1
   eval_interval: 0
   eval_num_samples: 0
-  normalize_advantage: false
-  epsilon_clip: null
+  eval_batch_size: 1
 
 reward_processor:
   enabled: true

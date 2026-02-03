@@ -353,6 +353,7 @@ def main() -> int:
     output_cfg = cfg.get("output") or {}
     if not isinstance(output_cfg, dict):
         output_cfg = {}
+    output_dir = output_cfg.get("base_dir", os.path.join(os.getcwd(), "output"))
     output_verbose = bool(output_cfg.get("verbose", False))
     external_cfg = cfg.get("external") or {}
     if not isinstance(external_cfg, dict):
@@ -375,7 +376,11 @@ def main() -> int:
         )
         if not isinstance(tags, list):
             tags = ["maac", dataset_type, f"agents_{num_agents}", f"turns_{num_turns_val}"]
-        run_name = wandb_cfg.get("run_name") or "str_rainbow_maac"
+        run_name = (
+            wandb_cfg.get("name")
+            or wandb_cfg.get("run_name")
+            or "str_rainbow_maac"
+        )
         wandb_config = {
             "project": wandb_cfg.get("project", "str_rainbow"),
             "entity": wandb_cfg.get("entity", None),
@@ -574,7 +579,7 @@ def main() -> int:
         if save_path_cfg:
             save_path = str(save_path_cfg)
         else:
-            save_path = os.path.join(os.path.abspath(maac_args.output_dir), "final_model")
+            save_path = os.path.join(os.path.abspath(str(output_dir)), "final_model")
         trainer.save_model(save_path)
         print(f"Model saved to: {save_path}")
 

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 import inspect
-import os
 
 from comlrl.trainers.iac import IACConfig  # type: ignore
 from comlrl.trainers.maac import MAACConfig  # type: ignore
@@ -92,10 +91,6 @@ def get_trainer_args(cfg: Dict[str, Any]) -> MAGRPOConfig:
     if not isinstance(tr, dict):
         tr = {}
 
-    output_cfg = cfg.get("output", {}) or {}
-    output_dir_cfg = tr.get("output_dir", output_cfg.get("base_dir", os.path.join(os.getcwd(), "output")))
-    output_dir_resolved = str(output_dir_cfg)
-
     lr_val = tr.get("learning_rate", tr.get("lr", 3e-5))
 
     joint_mode = tr.get("joint_mode", tr.get("joint_action_mode", None))
@@ -106,12 +101,10 @@ def get_trainer_args(cfg: Dict[str, Any]) -> MAGRPOConfig:
         joint_mode_str = "cross"
 
     candidate = {
-        "output_dir": output_dir_resolved,
         "num_turns": _as_int(tr.get("num_turns", 1), 1),
         "num_train_epochs": _as_int(tr.get("num_train_epochs", 3), 3),
         "learning_rate": _as_float(lr_val, 3e-5),
         "logging_steps": _as_int(tr.get("logging_steps", 50), 50),
-        "save_steps": _as_int(tr.get("save_steps", 200), 200),
         "num_generations": _as_int(tr.get("num_generations", 4), 4),
         "max_new_tokens": _as_int(tr.get("max_new_tokens", 512), 512),
         "temperature": _as_float(tr.get("temperature", 0.2), 0.2),
@@ -134,8 +127,7 @@ def get_trainer_args(cfg: Dict[str, Any]) -> MAGRPOConfig:
             "rollout_buffer_size": _as_int(tr.get("rollout_buffer_size", 2), 2),
             "eval_interval": _as_int(tr.get("eval_interval", 16), 16),
             "eval_num_samples": _as_int(tr.get("eval_num_samples", 4), 4),
-            "normalize_advantage": bool(tr.get("normalize_advantage", False)),
-            "epsilon_clip": _as_opt_float(tr.get("epsilon_clip", None), None),
+            "eval_batch_size": _as_int(tr.get("eval_batch_size", 1), 1),
         }
     )
 
@@ -160,10 +152,6 @@ def get_maac_args(cfg: Dict[str, Any], *, model_name: Optional[str] = None) -> M
     if not isinstance(tr, dict):
         tr = {}
 
-    output_cfg = cfg.get("output", {}) or {}
-    output_dir_cfg = tr.get("output_dir", output_cfg.get("base_dir", os.path.join(os.getcwd(), "output")))
-    output_dir_resolved = str(output_dir_cfg)
-
     critic_model = tr.get("critic_model") or tr.get("critic_model_name_or_path") or model_name
     if critic_model is None:
         raise ValueError("maac.critic_model_name_or_path must be provided")
@@ -171,7 +159,6 @@ def get_maac_args(cfg: Dict[str, Any], *, model_name: Optional[str] = None) -> M
     adv_norm = tr.get("advantage_normalization", tr.get("normalize_advantage", True))
 
     candidate = {
-        "output_dir": output_dir_resolved,
         "num_turns": _as_int(tr.get("num_turns", 1), 1),
         "num_train_epochs": _as_int(tr.get("num_train_epochs", 40), 40),
         "actor_learning_rate": _as_float(tr.get("actor_learning_rate", 5e-6), 5e-6),
@@ -202,6 +189,7 @@ def get_maac_args(cfg: Dict[str, Any], *, model_name: Optional[str] = None) -> M
         ),
         "eval_interval": _as_int(tr.get("eval_interval", 16), 16),
         "eval_num_samples": _as_int(tr.get("eval_num_samples", 4), 4),
+        "eval_batch_size": _as_int(tr.get("eval_batch_size", 1), 1),
         "logging_steps": _as_int(tr.get("logging_steps", 1), 1),
         "pad_token_id": _as_opt_int(tr.get("pad_token_id", None), None),
     }
@@ -223,10 +211,6 @@ def get_iac_args(cfg: Dict[str, Any], *, model_name: Optional[str] = None) -> IA
     if not isinstance(tr, dict):
         tr = {}
 
-    output_cfg = cfg.get("output", {}) or {}
-    output_dir_cfg = tr.get("output_dir", output_cfg.get("base_dir", os.path.join(os.getcwd(), "output")))
-    output_dir_resolved = str(output_dir_cfg)
-
     use_separate_critic = _as_bool(tr.get("use_separate_critic", True), True)
     critic_model = tr.get("critic_model") or tr.get("critic_model_name_or_path") or model_name
     if use_separate_critic and critic_model is None:
@@ -235,7 +219,6 @@ def get_iac_args(cfg: Dict[str, Any], *, model_name: Optional[str] = None) -> IA
     adv_norm = tr.get("advantage_normalization", tr.get("normalize_advantage", True))
 
     candidate = {
-        "output_dir": output_dir_resolved,
         "num_turns": _as_int(tr.get("num_turns", 1), 1),
         "num_train_epochs": _as_int(tr.get("num_train_epochs", 40), 40),
         "actor_learning_rate": _as_float(tr.get("actor_learning_rate", 5e-6), 5e-6),
@@ -250,7 +233,6 @@ def get_iac_args(cfg: Dict[str, Any], *, model_name: Optional[str] = None) -> IA
         "rollout_buffer_size": _as_int(tr.get("rollout_buffer_size", 8), 8),
         "value_loss_coef": _as_float(tr.get("value_loss_coef", 0.6), 0.6),
         "value_clip_range": _as_opt_float(tr.get("value_clip_range", 0.05), 0.05),
-        "entropy_coef": _as_float(tr.get("entropy_coef", 0.0), 0.0),
         "advantage_normalization": _as_bool(adv_norm, True),
         "max_new_tokens": _as_int(tr.get("max_new_tokens", 256), 256),
         "temperature": _as_float(tr.get("temperature", 0.6), 0.6),
@@ -272,6 +254,7 @@ def get_iac_args(cfg: Dict[str, Any], *, model_name: Optional[str] = None) -> IA
         ),
         "eval_interval": _as_int(tr.get("eval_interval", 16), 16),
         "eval_num_samples": _as_int(tr.get("eval_num_samples", 4), 4),
+        "eval_batch_size": _as_int(tr.get("eval_batch_size", 1), 1),
         "logging_steps": _as_int(tr.get("logging_steps", 1), 1),
         "pad_token_id": _as_opt_int(tr.get("pad_token_id", None), None),
     }
