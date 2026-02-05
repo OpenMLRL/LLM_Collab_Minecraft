@@ -1,4 +1,4 @@
-# LLM_Collab_MC
+# LLM_Collab_Minecraft
 
 ## Smoke test (mineflayer executor bot)
 
@@ -32,9 +32,9 @@ Important: `op executor_bot` is a Minecraft server/admin command (not a bash com
 
 2) In another terminal, enter this repo and install node deps (once):
 
-`cd LLM_Collab_MC && npm install`
+`cd LLM_Collab_Minecraft && npm install`
 
-3) Run the smoke test from `LLM_Collab_MC/`:
+3) Run the smoke test from `LLM_Collab_Minecraft/`:
 
 `python3 test/test_env.py --host 127.0.0.1 --port 25565 --username executor_bot`
 

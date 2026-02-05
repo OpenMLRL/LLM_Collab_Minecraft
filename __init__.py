@@ -1,2 +1,2 @@
-"""LLM_Collab_MC package."""
+"""LLM_Collab_Minecraft package."""
 

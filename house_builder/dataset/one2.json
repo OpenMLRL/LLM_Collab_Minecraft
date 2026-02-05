@@ -1,0 +1,125 @@
+{
+  "task_id": "house_builder_0002",
+  "palette": {
+    "C": "white_concrete",
+    "O": "obsidian",
+    "S": "stone_stairs",
+    "B": "stone_bricks",
+    "D": "planks",
+    "A": "air"
+  },
+  "count": {
+    "C": 68,
+    "O": 12,
+    "S": 36,
+    "B": 54,
+    "D": 2,
+    "A": 122
+  },
+  "target_spec": {
+    "type": "y_layers",
+    "size": [
+      6,
+      7,
+      7
+    ],
+    "layers": [
+      {
+        "y": 0,
+        "rows": [
+          "AAAAAA",
+          "CCCCCC",
+          "CCCCCC",
+          "CCCCCC",
+          "CCCCCC",
+          "CCCCCC",
+          "AAAAAA"
+        ]
+      },
+      {
+        "y": 1,
+        "rows": [
+          "AAAAAA",
+          "OCDDCO",
+          "CAAAAC",
+          "CAAAAC",
+          "CAAAAC",
+          "OCCCCO",
+          "AAAAAA"
+        ]
+      },
+      {
+        "y": 2,
+        "rows": [
+          "AAAAAA",
+          "OCAACO",
+          "CAAAAC",
+          "CAAAAC",
+          "CAAAAC",
+          "OCCCCO",
+          "AAAAAA"
+        ]
+      },
+      {
+        "y": 3,
+        "rows": [
+          "AAAAAA",
+          "OCCCCO",
+          "CAAAAC",
+          "CAAAAC",
+          "CAAAAC",
+          "OCCCCO",
+          "AAAAAA"
+        ]
+      },
+      {
+        "y": 4,
+        "rows": [
+          "SSSSSS",
+          "BBBBBB",
+          "BBBBBB",
+          "BBBBBB",
+          "BBBBBB",
+          "BBBBBB",
+          "SSSSSS"
+        ]
+      },
+      {
+        "y": 5,
+        "rows": [
+          "AAAAAA",
+          "SSSSSS",
+          "BBBBBB",
+          "BBBBBB",
+          "BBBBBB",
+          "SSSSSS",
+          "AAAAAA"
+        ]
+      },
+      {
+        "y": 6,
+        "rows": [
+          "AAAAAA",
+          "AAAAAA",
+          "SSSSSS",
+          "BBBBBB",
+          "SSSSSS",
+          "AAAAAA",
+          "AAAAAA"
+        ]
+      }
+    ]
+  },
+  "bbox": {
+    "from": [
+      0,
+      0,
+      0
+    ],
+    "to": [
+      5,
+      6,
+      6
+    ]
+  }
+}

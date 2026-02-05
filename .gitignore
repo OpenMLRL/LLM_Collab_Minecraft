@@ -17,17 +17,17 @@ test/view_building_demo/run_sbatch.sh
 test/view_building_demo/slurm_logs/
 
 # Training scripts
-str_rainbow/scripts/
-box_builder/scripts/
+str_builder/scripts/
+house_builder/scripts/
 str_builder/scripts/**/*.sh
 !str_builder/scripts/**/*.example.sh
 str_builder/scripts/**/*.out
 str_painter/scripts/**/*.sh
 !str_painter/scripts/**/*.example.sh
 str_painter/scripts/**/*.out
-str_rainbow/scripts/**/*.sh
-!str_rainbow/scripts/**/*.example.sh
-str_rainbow/scripts/**/*.out
-box_builder/scripts/**/*.sh
-!box_builder/scripts/**/*.example.sh
-box_builder/scripts/**/*.out
+str_builder/scripts/**/*.sh
+!str_builder/scripts/**/*.example.sh
+str_builder/scripts/**/*.out
+house_builder/scripts/**/*.sh
+!house_builder/scripts/**/*.example.sh
+house_builder/scripts/**/*.out

@@ -16,7 +16,7 @@ It also starts a browser viewer (prismarine-viewer) so you can watch the result.
 From repo root:
 
 ```bash
-cd LLM_Collab_MC
+cd LLM_Collab_Minecraft
 npm install
 ```
 
@@ -50,7 +50,7 @@ cd ~/mc-server && java -Xms1G -Xmx1G -jar paper-1.19.2-307.jar --nogui
 In a second shell on the same allocation (use `tmux`, or another `srun --pty bash`), run the demo:
 
 ```bash
-cd ~/LLM_Collab_MC
+cd ~/LLM_Collab_Minecraft
 node test/view_building_demo/build_house_demo.cjs --llm-device cuda --viewer-port 3000
 ```
 
