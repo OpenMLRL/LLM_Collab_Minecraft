@@ -166,11 +166,6 @@ def get_maac_args(cfg: Dict[str, Any], *, model_name: Optional[str] = None) -> M
         "critic_learning_rate": _as_float(
             tr.get("critic_learning_rate", 5e-6), 5e-6
         ),
-        "weight_decay": _as_float(tr.get("weight_decay", 0.0), 0.0),
-        "adam_beta1": _as_float(tr.get("adam_beta1", 0.9), 0.9),
-        "adam_beta2": _as_float(tr.get("adam_beta2", 0.999), 0.999),
-        "adam_epsilon": _as_float(tr.get("adam_epsilon", 1e-8), 1e-8),
-        "max_grad_norm": _as_float(tr.get("max_grad_norm", 0.5), 0.5),
         "rollout_buffer_size": _as_int(tr.get("rollout_buffer_size", 8), 8),
         "value_loss_coef": _as_float(tr.get("value_loss_coef", 0.6), 0.6),
         "advantage_normalization": _as_bool(adv_norm, True),
@@ -226,11 +221,6 @@ def get_iac_args(cfg: Dict[str, Any], *, model_name: Optional[str] = None) -> IA
         "critic_learning_rate": _as_opt_float(
             tr.get("critic_learning_rate", 5e-6), 5e-6
         ),
-        "weight_decay": _as_float(tr.get("weight_decay", 0.0), 0.0),
-        "adam_beta1": _as_float(tr.get("adam_beta1", 0.9), 0.9),
-        "adam_beta2": _as_float(tr.get("adam_beta2", 0.999), 0.999),
-        "adam_epsilon": _as_float(tr.get("adam_epsilon", 1e-8), 1e-8),
-        "max_grad_norm": _as_float(tr.get("max_grad_norm", 0.5), 0.5),
         "rollout_buffer_size": _as_int(tr.get("rollout_buffer_size", 8), 8),
         "value_loss_coef": _as_float(tr.get("value_loss_coef", 0.6), 0.6),
         "value_clip_range": _as_opt_float(tr.get("value_clip_range", 0.05), 0.05),
