@@ -1,0 +1,77 @@
+model:
+  name: Qwen/Qwen3-4B-Instruct-2507
+  type: qwen
+  temperature: 0.6
+  top_p: 0.6
+  max_length: 2048
+  dtype: bf16
+
+critic:
+  name: "Qwen/Qwen3-4B-Instruct-2507"
+  type: qwen
+  temperature: 0.6
+  top_p: 0.6
+  max_length: 2048
+  dtype: bf16
+
+
+dataset:
+  name: str_build
+  type: str_build
+  csv_path: ../dataset/data.csv
+  train_split: "[:]"
+  spacing: 2
+  local_z: 0
+
+output:
+  base_dir: output
+  save_final_model: false
+  save_path: output/final_model
+  verbose: false
+
+external:
+  mode: position_feedback
+  original_prompt: true
+  previous_response: true
+
+maac:
+  num_agents: 2
+  num_turns: 4
+  critic_type: v
+  num_train_epochs: 150
+  agent_learning_rate: 2.5e-6
+  critic_learning_rate: 2.5e-6
+  value_loss_coef: 0.6
+  rollout_buffer_size: 1
+  train_batch_size: 1
+  max_new_tokens: 512
+  temperature: 0.6
+  top_p: 0.6
+  top_k: null
+  discount: 0.9
+  early_termination_threshold: -0.1
+  eval_interval: 0
+  eval_num_samples: 1
+  eval_batch_size: 1
+  logging_steps: 20
+
+reward_processor:
+  enabled: true
+  scale_factor: 1.0
+  shift: -2.0
+
+wandb:
+  project: str_build
+  entity: OpenMLRL
+  run_name: str_build_maac
+  dir: output
+  tags: ["maac", "str_build"]
+
+prompt:
+  provide_graph: false
+  use_chat_template: true
+
+task:
+  block_agent1: [oak_planks, stone, air]
+  block_agent2: [white_concrete, obsidian, air]
+  max_commands: 300

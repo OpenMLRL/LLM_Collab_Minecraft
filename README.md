@@ -38,24 +38,24 @@ Important: `op executor_bot` is a Minecraft server/admin command (not a bash com
 
 `python3 test/test_env.py --host 127.0.0.1 --port 25565 --username executor_bot`
 
-## Train (str_builder)
+## Train (StrBuild)
 
-Configs: `str_builder/configs/str_builder_magrpo_config.yaml`, `str_builder/configs/str_builder_iac_config.yaml`, `str_builder/configs/str_builder_maac_config.yaml`.
-
-Local (requires GPU + `comlrl` env):
-1. `python3 str_builder/train/train_magrpo.py --config str_builder/configs/str_builder_magrpo_config.yaml`
-2. `python3 str_builder/train/train_iac.py --config str_builder/configs/str_builder_iac_config.yaml`
-3. `python3 str_builder/train/train_maac.py --config str_builder/configs/str_builder_maac_config.yaml`
-
-Multi-turn: set `magrpo.num_turns` / `iac.num_turns` / `maac.num_turns` > 1 and choose `external.mode` from `perfect_feedback`, `position_feedback`, or `score_feedback` (see `str_builder/external/__init__.py`).
-
-## Train (house_builder)
-
-Configs: `house_builder/configs/house_builder_magrpo_config.yaml`, `house_builder/configs/house_builder_iac_config.yaml`, `house_builder/configs/house_builder_maac_config.yaml`.
+Configs: `str_build/configs/str_build_magrpo_config.yaml`, `str_build/configs/str_build_iac_config.yaml`, `str_build/configs/str_build_maac_config.yaml`.
 
 Local (requires GPU + `comlrl` env):
-1. `python3 house_builder/train/train_magrpo.py --config house_builder/configs/house_builder_magrpo_config.yaml`
-2. `python3 house_builder/train/train_iac.py --config house_builder/configs/house_builder_iac_config.yaml`
-3. `python3 house_builder/train/train_maac.py --config house_builder/configs/house_builder_maac_config.yaml`
+1. `python3 str_build/train/train_magrpo.py --config str_build/configs/str_build_magrpo_config.yaml`
+2. `python3 str_build/train/train_iac.py --config str_build/configs/str_build_iac_config.yaml`
+3. `python3 str_build/train/train_maac.py --config str_build/configs/str_build_maac_config.yaml`
 
-Multi-turn: set `magrpo.num_turns` / `iac.num_turns` / `maac.num_turns` > 1 and choose `external.mode` from `perfect_feedback`, `position_feedback`, `position_modification`, `rect_modification`, `resource_schedule`, or `score_feedback` (see `house_builder/external/__init__.py`).
+Multi-turn: set `magrpo.num_turns` / `iac.num_turns` / `maac.num_turns` > 1 and choose `external.mode` from `perfect_feedback`, `position_feedback`, or `score_feedback` (see `str_build/external/__init__.py`).
+
+## Train (HouseBuild)
+
+Configs: `house_build/configs/house_build_magrpo_config.yaml`, `house_build/configs/house_build_iac_config.yaml`, `house_build/configs/house_build_maac_config.yaml`.
+
+Local (requires GPU + `comlrl` env):
+1. `python3 house_build/train/train_magrpo.py --config house_build/configs/house_build_magrpo_config.yaml`
+2. `python3 house_build/train/train_iac.py --config house_build/configs/house_build_iac_config.yaml`
+3. `python3 house_build/train/train_maac.py --config house_build/configs/house_build_maac_config.yaml`
+
+Multi-turn: set `magrpo.num_turns` / `iac.num_turns` / `maac.num_turns` > 1 and choose `external.mode` from `perfect_feedback`, `position_feedback`, `position_modification`, `rect_modification`, `resource_schedule`, or `score_feedback` (see `house_build/external/__init__.py`).
