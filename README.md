@@ -1,61 +1,79 @@
-# LLM_Collab_Minecraft
+# LLM Collaboration – Minecraft
 
-## Smoke test (mineflayer executor bot)
+This repo provides the Minecraft environments for [**CoMLRL**](https://github.com/OpenMLRL/CoMLRL).
 
-Prereqs: Node.js >= 18, Python 3.
+<img src="./demo_mc.png" alt="Writing demo" width="500px">
 
-0) (Optional) Start a local Paper server (1.19.2 example)
+## Installation
 
-In a terminal:
+Install [**CoMLRL**](https://github.com/OpenMLRL/CoMLRL):
 
-`mkdir -p ~/mc-server && cd ~/mc-server`
+```bash
+pip install comlrl
+# Install PyTorch compatible with your device
+```
 
-`curl -fsSL https://api.papermc.io/v2/projects/paper/versions/1.19.2/builds/307/downloads/paper-1.19.2-307.jar -o paper-1.19.2-307.jar`
+Or via conda-forge:
 
-`echo "eula=true" > eula.txt`
+```bash
+conda install -c conda-forge comlrl
+# Install PyTorch compatible with your device
+```
 
-Start the server:
+Install the Mineflayer dependencies:
 
-`cd ~/mc-server && java -Xms1G -Xmx1G -jar paper-1.19.2-307.jar --nogui`
+```bash
+cd LLM_Collab_Minecraft
+npm install
+```
 
-1) OP the bot username
+## Environments
 
-Important: `op executor_bot` is a Minecraft server/admin command (not a bash command).
+- **StrBuild**: agents build structures from string blueprints.
+- **HouseBuild**: agents construct houses from layered blueprints under resource limits and spider attacks.
 
-- If you have access to the Minecraft server console (the terminal where the server is running), type:
+## Training Scripts
 
-`op executor_bot`
+StrBuild:
 
-- If you are typing inside Minecraft in-game chat (as an admin), use:
+```bash
+python3 str_build/train/train_magrpo.py --config str_build/configs/str_build_magrpo_config.yaml
+python3 str_build/train/train_iac.py --config str_build/configs/str_build_iac_config.yaml
+python3 str_build/train/train_maac.py --config str_build/configs/str_build_maac_config.yaml
+```
 
-`/op executor_bot`
+HouseBuild:
 
-2) In another terminal, enter this repo and install node deps (once):
+```bash
+python3 house_build/train/train_magrpo.py --config house_build/configs/house_build_magrpo_config.yaml
+python3 house_build/train/train_iac.py --config house_build/configs/house_build_iac_config.yaml
+python3 house_build/train/train_maac.py --config house_build/configs/house_build_maac_config.yaml
+```
 
-`cd LLM_Collab_Minecraft && npm install`
+Override any configuration value inline with `--override`:
 
-3) Run the smoke test from `LLM_Collab_Minecraft/`:
+```bash
+python3 str_build/train/train_magrpo.py \
+  --config str_build/configs/str_build_magrpo_config.yaml \
+  --override model.name='Qwen/Qwen2.5-1.5B-Instruct' magrpo.num_turns=1
+```
 
-`python3 test/test_env.py --host 127.0.0.1 --port 25565 --username executor_bot`
+## Multi-Turn External Feedback
 
-## Train (StrBuild)
+Enable multi-turn training by setting `magrpo.num_turns` / `iac.num_turns` / `maac.num_turns` > 1 and choose an `external.mode`.
 
-Configs: `str_build/configs/str_build_magrpo_config.yaml`, `str_build/configs/str_build_iac_config.yaml`, `str_build/configs/str_build_maac_config.yaml`.
+StrBuild modes:
 
-Local (requires GPU + `comlrl` env):
-1. `python3 str_build/train/train_magrpo.py --config str_build/configs/str_build_magrpo_config.yaml`
-2. `python3 str_build/train/train_iac.py --config str_build/configs/str_build_iac_config.yaml`
-3. `python3 str_build/train/train_maac.py --config str_build/configs/str_build_maac_config.yaml`
+- `perfect_feedback`
+- `position_feedback`
+- `score_feedback`
 
-Multi-turn: set `magrpo.num_turns` / `iac.num_turns` / `maac.num_turns` > 1 and choose `external.mode` from `perfect_feedback`, `position_feedback`, or `score_feedback` (see `str_build/external/__init__.py`).
+HouseBuild modes:
 
-## Train (HouseBuild)
+- `perfect_feedback`
+- `position_feedback`
+- `position_modification`
+- `rect_modification`
+- `resource_schedule`
+- `score_feedback`
 
-Configs: `house_build/configs/house_build_magrpo_config.yaml`, `house_build/configs/house_build_iac_config.yaml`, `house_build/configs/house_build_maac_config.yaml`.
-
-Local (requires GPU + `comlrl` env):
-1. `python3 house_build/train/train_magrpo.py --config house_build/configs/house_build_magrpo_config.yaml`
-2. `python3 house_build/train/train_iac.py --config house_build/configs/house_build_iac_config.yaml`
-3. `python3 house_build/train/train_maac.py --config house_build/configs/house_build_maac_config.yaml`
-
-Multi-turn: set `magrpo.num_turns` / `iac.num_turns` / `maac.num_turns` > 1 and choose `external.mode` from `perfect_feedback`, `position_feedback`, `position_modification`, `rect_modification`, `resource_schedule`, or `score_feedback` (see `house_build/external/__init__.py`).
