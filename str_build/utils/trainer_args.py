@@ -109,6 +109,7 @@ def get_trainer_args(cfg: Dict[str, Any]) -> MAGRPOConfig:
         "max_new_tokens": _as_int(tr.get("max_new_tokens", 512), 512),
         "temperature": _as_float(tr.get("temperature", 0.2), 0.2),
         "top_p": _as_float(tr.get("top_p", 0.95), 0.95),
+        "agent_devices": tr.get("agent_devices"),
     }
     if "top_k" in tr:
         candidate["top_k"] = _as_opt_int(tr.get("top_k", None), None)
@@ -172,6 +173,8 @@ def get_maac_args(cfg: Dict[str, Any], *, model_name: Optional[str] = None) -> M
         "top_k": _as_opt_int(tr.get("top_k", None), None),
         "num_agents": _as_int(tr.get("num_agents", 2), 2),
         "num_generations": _as_int(tr.get("num_generations", 1), 1),
+        "agent_devices": tr.get("agent_devices"),
+        "critic_devices": tr.get("critic_devices"),
         "discount": _as_float(tr.get("discount", 0.9), 0.9),
         "critic_type": str(tr.get("critic_type", "v")),
         "early_termination_threshold": _as_opt_float(
@@ -221,6 +224,8 @@ def get_iac_args(cfg: Dict[str, Any], *, model_name: Optional[str] = None) -> IA
         "num_agents": _as_int(tr.get("num_agents", 2), 2),
         "num_generations": _as_int(tr.get("num_generations", 1), 1),
         "use_separate_critic": use_separate_critic,
+        "agent_devices": tr.get("agent_devices"),
+        "critic_devices": tr.get("critic_devices"),
         "critic_value_head_hidden_dim": _as_opt_int(
             tr.get("critic_value_head_hidden_dim", None), None
         ),
