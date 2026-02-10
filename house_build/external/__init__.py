@@ -19,11 +19,9 @@ from . import resource_schedule
 from . import score_feedback
 
 
-# Verbose toggle for external previews
 VERBOSE = False
 
 
-# Context resolver API
 _context_resolver: Optional[Callable[[str], Optional[Dict[str, Any]]]] = None
 
 
