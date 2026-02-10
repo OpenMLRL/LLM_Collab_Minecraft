@@ -261,28 +261,21 @@ def main() -> int:
     if not isinstance(critic_cfg, dict):
         critic_cfg = {}
     model_name = str(model_cfg.get("name") or "")
-    agent_names = model_cfg.get("agents")
-    top_agents = cfg.get("agents")
-    if isinstance(top_agents, (list, tuple)):
-        if not all(isinstance(x, str) for x in top_agents):
-            raise ValueError("agents must be a list of model names.")
-        top_agents = [str(x) for x in top_agents]
-        if agent_names is not None and list(agent_names) != top_agents:
-            raise ValueError("model.agents conflicts with agents.")
-        if agent_names is None:
-            agent_names = top_agents
+    if model_cfg.get("agents") is not None:
+        raise ValueError("model.agents is not supported; use top-level agents.")
+    agent_names = cfg.get("agents")
     if not model_name and not agent_names:
-        raise ValueError("model.name or model.agents is required")
+        raise ValueError("model.name or agents is required")
     if agent_names is not None:
         if not isinstance(agent_names, (list, tuple)) or not all(
             isinstance(x, str) for x in agent_names
         ):
-            raise ValueError("model.agents must be a list of model names.")
+            raise ValueError("agents must be a list of model names.")
         agent_names = [str(x) for x in agent_names]
         if model_name and any(name != model_name for name in agent_names):
-            raise ValueError("model.name conflicts with model.agents.")
+            raise ValueError("model.name conflicts with agents.")
         if len(agent_names) != int(num_agents):
-            raise ValueError("model.agents length must match maac.num_agents.")
+            raise ValueError("agents length must match maac.num_agents.")
     model_kwargs: Dict[str, Any] = {}
 
     dtype = _map_dtype(model_cfg.get("dtype") or model_cfg.get("torch_dtype"))
@@ -291,7 +284,7 @@ def main() -> int:
 
     tokenizer_source = model_name or (agent_names[0] if agent_names else None)
     if not tokenizer_source:
-        raise ValueError("model.name or model.agents must be provided.")
+        raise ValueError("model.name or agents must be provided.")
     if agent_names:
         tokenizers = [AutoTokenizer.from_pretrained(name) for name in agent_names]
     else:
