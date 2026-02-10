@@ -394,17 +394,45 @@ def main() -> int:
     if not isinstance(critic_cfg, dict):
         critic_cfg = {}
     model_name = str(model_cfg.get("name") or "")
-    if not model_name:
-        raise ValueError("model.name is required")
+    agent_names = model_cfg.get("agents")
+    top_agents = cfg.get("agents")
+    if isinstance(top_agents, (list, tuple)):
+        if not all(isinstance(x, str) for x in top_agents):
+            raise ValueError("agents must be a list of model names.")
+        top_agents = [str(x) for x in top_agents]
+        if agent_names is not None and list(agent_names) != top_agents:
+            raise ValueError("model.agents conflicts with agents.")
+        if agent_names is None:
+            agent_names = top_agents
+    if not model_name and not agent_names:
+        raise ValueError("model.name or model.agents is required")
+    if agent_names is not None:
+        if not isinstance(agent_names, (list, tuple)) or not all(
+            isinstance(x, str) for x in agent_names
+        ):
+            raise ValueError("model.agents must be a list of model names.")
+        agent_names = [str(x) for x in agent_names]
+        if model_name and any(name != model_name for name in agent_names):
+            raise ValueError("model.name conflicts with model.agents.")
+        if len(agent_names) != int(num_agents):
+            raise ValueError("model.agents length must match iac.num_agents.")
     model_kwargs: Dict[str, Any] = {}
 
     dtype = _map_dtype(model_cfg.get("dtype") or model_cfg.get("torch_dtype"))
     if dtype is not None:
         model_kwargs["torch_dtype"] = dtype
 
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
+    tokenizer_source = model_name or (agent_names[0] if agent_names else None)
+    if not tokenizer_source:
+        raise ValueError("model.name or model.agents must be provided.")
+    if agent_names:
+        tokenizers = [AutoTokenizer.from_pretrained(name) for name in agent_names]
+    else:
+        tokenizers = [AutoTokenizer.from_pretrained(tokenizer_source)]
+    for tok in tokenizers:
+        if tok.pad_token is None:
+            tok.pad_token = tok.eos_token
+    tokenizer = tokenizers[0]
 
     iac_args = get_iac_args(cfg, model_name=model_name)
     formatters = _build_formatters(cfg, num_agents=num_agents, tokenizer=tokenizer)
@@ -600,8 +628,7 @@ def main() -> int:
             critic_model_kwargs["torch_dtype"] = critic_dtype
 
     trainer_kwargs: Dict[str, Any] = {
-        "model": model_name,
-        "tokenizer": tokenizer,
+        "tokenizer": tokenizers if agent_names else tokenizer,
         "reward_func": reward_func,
         "formatters": formatters,
         "args": iac_args,
@@ -615,6 +642,10 @@ def main() -> int:
         },
         "wandb_config": wandb_config,
     }
+    if agent_names:
+        trainer_kwargs["agents"] = agent_names
+    else:
+        trainer_kwargs["model"] = model_name
     critics = None
     if bool(getattr(iac_args, "use_separate_critic", True)):
         critic_name = str(critic_cfg.get("name") or "").strip()
