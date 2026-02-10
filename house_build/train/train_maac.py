@@ -403,10 +403,6 @@ def main() -> int:
         ):
             raise ValueError("agents must be a list of model names.")
         agent_names = [str(x) for x in agent_names]
-        if model_name and any(name != model_name for name in agent_names):
-            raise ValueError("agent_model.name conflicts with agents.")
-        if len(agent_names) != int(num_agents):
-            raise ValueError("agents length must match maac.num_agents.")
 
     critic_names = None
     critics_field = cfg.get("critics")
@@ -416,15 +412,13 @@ def main() -> int:
         ):
             raise ValueError("critics must be a list of model names.")
         critic_names = [str(x) for x in critics_field]
-        if len(critic_names) != 1:
-            raise ValueError("critics length must match 1 critic.")
     model_kwargs: Dict[str, Any] = {}
 
     dtype = _map_dtype(model_cfg.get("dtype") or model_cfg.get("torch_dtype"))
     if dtype is not None:
         model_kwargs["torch_dtype"] = dtype
 
-    tokenizer_source = model_name or (agent_names[0] if agent_names else None)
+    tokenizer_source = agent_names[0] if agent_names else model_name
     if not tokenizer_source:
         raise ValueError("agent_model.name or agents must be provided.")
     if agent_names:
@@ -623,14 +617,7 @@ def main() -> int:
         is_multi_turn = int(getattr(maac_args, "num_turns", 1)) > 1
     except Exception:
         is_multi_turn = False
-    critic_name = str(critic_model_cfg.get("name") or "").strip()
-    if critic_names is None:
-        if not critic_name:
-            raise ValueError("critic_model.name must be provided for MAAC")
-        critic_names = [critic_name]
-    else:
-        if critic_name and any(name != critic_name for name in critic_names):
-            raise ValueError("critic_model.name conflicts with critics.")
+    critic_name = str(critic_model_cfg.get("name") or "").strip() or None
     critic_model_kwargs: Dict[str, Any] = {}
     critic_dtype = _map_dtype(
         critic_model_cfg.get("dtype") or critic_model_cfg.get("torch_dtype")
@@ -652,11 +639,13 @@ def main() -> int:
         },
         "wandb_config": wandb_config,
     }
+    trainer_kwargs["agent_model"] = model_name or None
     if agent_names:
         trainer_kwargs["agents"] = agent_names
-    else:
-        trainer_kwargs["agent_model"] = model_name
-    trainer_kwargs["critics"] = critic_names
+    if critic_name:
+        trainer_kwargs["critic_model"] = critic_name
+    if critic_names:
+        trainer_kwargs["critics"] = critic_names
     if reward_processor is not None:
         trainer_kwargs["reward_processor"] = reward_processor
 

@@ -400,17 +400,13 @@ def main() -> int:
         ):
             raise ValueError("agents must be a list of model names.")
         agent_names = [str(x) for x in agent_names]
-        if model_name and any(name != model_name for name in agent_names):
-            raise ValueError("agent_model.name conflicts with agents.")
-        if len(agent_names) != int(num_agents):
-            raise ValueError("agents length must match magrpo.num_agents.")
     model_kwargs: Dict[str, Any] = {}
 
     dtype = _map_dtype(model_cfg.get("dtype") or model_cfg.get("torch_dtype"))
     if dtype is not None:
         model_kwargs["torch_dtype"] = dtype
 
-    tokenizer_source = model_name or (agent_names[0] if agent_names else None)
+    tokenizer_source = agent_names[0] if agent_names else model_name
     if not tokenizer_source:
         raise ValueError("agent_model.name or agents must be provided.")
     if agent_names:
@@ -510,6 +506,7 @@ def main() -> int:
         is_multi_turn = False
 
     trainer_kwargs: Dict[str, Any] = {
+        "agent_model": model_name or None,
         "agents": agents,
         "num_agents": num_agents,
         "reward_func": reward_func,
