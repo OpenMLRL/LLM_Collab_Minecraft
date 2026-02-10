@@ -55,7 +55,7 @@ Override any configuration value inline with `--override`:
 ```bash
 python3 str_build/train/train_magrpo.py \
   --config str_build/configs/str_build_magrpo_config.yaml \
-  --override model.name='Qwen/Qwen2.5-1.5B-Instruct' magrpo.num_turns=1
+  --override agent_model.name='Qwen/Qwen2.5-1.5B-Instruct' magrpo.num_turns=1
 ```
 
 ## Multi-Turn External Feedback
@@ -76,4 +76,3 @@ HouseBuild modes:
 - `rect_modification`
 - `resource_schedule`
 - `score_feedback`
-

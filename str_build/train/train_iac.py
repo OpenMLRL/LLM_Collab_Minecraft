@@ -254,18 +254,16 @@ def main() -> int:
     train_ds = Dataset.from_list(train_items)
     eval_ds = Dataset.from_list(eval_items) if eval_items else None
 
-    model_cfg = cfg.get("model") or {}
+    model_cfg = cfg.get("agent_model") or {}
     if not isinstance(model_cfg, dict):
         model_cfg = {}
-    critic_cfg = cfg.get("critic") or {}
-    if not isinstance(critic_cfg, dict):
-        critic_cfg = {}
+    critic_model_cfg = cfg.get("critic_model") or {}
+    if not isinstance(critic_model_cfg, dict):
+        critic_model_cfg = {}
     model_name = str(model_cfg.get("name") or "")
-    if model_cfg.get("agents") is not None:
-        raise ValueError("model.agents is not supported; use top-level agents.")
     agent_names = cfg.get("agents")
     if not model_name and not agent_names:
-        raise ValueError("model.name or agents is required")
+        raise ValueError("agent_model.name or agents is required")
     if agent_names is not None:
         if not isinstance(agent_names, (list, tuple)) or not all(
             isinstance(x, str) for x in agent_names
@@ -273,9 +271,20 @@ def main() -> int:
             raise ValueError("agents must be a list of model names.")
         agent_names = [str(x) for x in agent_names]
         if model_name and any(name != model_name for name in agent_names):
-            raise ValueError("model.name conflicts with agents.")
+            raise ValueError("agent_model.name conflicts with agents.")
         if len(agent_names) != int(num_agents):
             raise ValueError("agents length must match iac.num_agents.")
+
+    critic_names = None
+    critics_field = cfg.get("critics")
+    if critics_field is not None:
+        if not isinstance(critics_field, (list, tuple)) or not all(
+            isinstance(x, str) for x in critics_field
+        ):
+            raise ValueError("critics must be a list of model names.")
+        critic_names = [str(x) for x in critics_field]
+        if len(critic_names) != int(num_agents):
+            raise ValueError("critics length must match iac.num_agents.")
     model_kwargs: Dict[str, Any] = {}
 
     dtype = _map_dtype(model_cfg.get("dtype") or model_cfg.get("torch_dtype"))
@@ -284,7 +293,7 @@ def main() -> int:
 
     tokenizer_source = model_name or (agent_names[0] if agent_names else None)
     if not tokenizer_source:
-        raise ValueError("model.name or agents must be provided.")
+        raise ValueError("agent_model.name or agents must be provided.")
     if agent_names:
         tokenizers = [AutoTokenizer.from_pretrained(name) for name in agent_names]
     else:
@@ -299,8 +308,10 @@ def main() -> int:
     prompt_to_item: Dict[str, Dict[str, Any]] = {}
     dataset_prompt_map: Dict[str, Dict[str, Any]] = {}
     critic_model_kwargs: Dict[str, Any] = {}
-    if isinstance(critic_cfg, dict):
-        critic_dtype = _map_dtype(critic_cfg.get("dtype") or critic_cfg.get("torch_dtype"))
+    if isinstance(critic_model_cfg, dict):
+        critic_dtype = _map_dtype(
+            critic_model_cfg.get("dtype") or critic_model_cfg.get("torch_dtype")
+        )
         if critic_dtype is not None:
             critic_model_kwargs["torch_dtype"] = critic_dtype
 
@@ -410,7 +421,7 @@ def main() -> int:
             "tags": tags,
             "config_sections": {
                 "dataset": dataset_cfg,
-                "model": model_cfg,
+                "agent_model": model_cfg,
                 "output": output_cfg,
                 "external": external_cfg,
                 "trainer": iac_cfg,
@@ -447,16 +458,23 @@ def main() -> int:
     if agent_names:
         trainer_kwargs["agents"] = agent_names
     else:
-        trainer_kwargs["model"] = model_name
-    critics = None
+        trainer_kwargs["agent_model"] = model_name
     if bool(getattr(iac_args, "use_separate_critic", True)):
-        critic_name = str(critic_cfg.get("name") or "").strip()
-        if not critic_name:
-            raise ValueError("critic.name must be provided when use_separate_critic is true")
         num_agents_val = int(getattr(iac_args, "num_agents", 1))
-        critics = [critic_name] * num_agents_val
-    if critics is not None:
-        trainer_kwargs["critics"] = critics
+        if critic_names is None:
+            critic_name = str(critic_model_cfg.get("name") or "").strip()
+            if not critic_name:
+                raise ValueError(
+                    "critic_model.name must be provided when use_separate_critic is true"
+                )
+            critic_names = [critic_name] * num_agents_val
+        else:
+            critic_name = str(critic_model_cfg.get("name") or "").strip()
+            if critic_name and any(name != critic_name for name in critic_names):
+                raise ValueError("critic_model.name conflicts with critics.")
+        trainer_kwargs["critics"] = critic_names
+    elif critic_names is not None:
+        raise ValueError("critics requires use_separate_critic=true.")
     if reward_processor is not None:
         trainer_kwargs["reward_processor"] = reward_processor
 

@@ -387,15 +387,13 @@ def main() -> int:
     train_ds = Dataset.from_list(train_items)
     eval_ds = Dataset.from_list(eval_items) if eval_items else None
 
-    model_cfg = cfg.get("model") or {}
+    model_cfg = cfg.get("agent_model") or {}
     if not isinstance(model_cfg, dict):
         model_cfg = {}
     model_name = str(model_cfg.get("name") or "")
-    if model_cfg.get("agents") is not None:
-        raise ValueError("model.agents is not supported; use top-level agents.")
     agent_names = cfg.get("agents")
     if not model_name and not agent_names:
-        raise ValueError("model.name or agents is required")
+        raise ValueError("agent_model.name or agents is required")
     if agent_names is not None:
         if not isinstance(agent_names, (list, tuple)) or not all(
             isinstance(x, str) for x in agent_names
@@ -403,7 +401,7 @@ def main() -> int:
             raise ValueError("agents must be a list of model names.")
         agent_names = [str(x) for x in agent_names]
         if model_name and any(name != model_name for name in agent_names):
-            raise ValueError("model.name conflicts with agents.")
+            raise ValueError("agent_model.name conflicts with agents.")
         if len(agent_names) != int(num_agents):
             raise ValueError("agents length must match magrpo.num_agents.")
     model_kwargs: Dict[str, Any] = {}
@@ -414,7 +412,7 @@ def main() -> int:
 
     tokenizer_source = model_name or (agent_names[0] if agent_names else None)
     if not tokenizer_source:
-        raise ValueError("model.name or agents must be provided.")
+        raise ValueError("agent_model.name or agents must be provided.")
     if agent_names:
         tokenizers = [AutoTokenizer.from_pretrained(name) for name in agent_names]
     else:
@@ -492,7 +490,7 @@ def main() -> int:
             "tags": tags,
             "config_sections": {
                 "dataset": dataset_cfg,
-                "model": model_cfg,
+                "agent_model": model_cfg,
                 "output": output_cfg,
                 "external": external_cfg,
                 "trainer": magrpo_cfg,

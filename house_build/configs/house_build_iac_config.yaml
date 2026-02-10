@@ -1,4 +1,4 @@
-model:
+agent_model:
   name: Qwen/Qwen3-4B-Instruct-2507
   type: qwen
   temperature: 0.6
@@ -6,7 +6,9 @@ model:
   max_length: 2048
   dtype: bf16
 
-critic:
+agents: null
+
+critic_model:
   name: "Qwen/Qwen3-4B-Instruct-2507"
   type: qwen
   temperature: 0.6
@@ -14,6 +16,7 @@ critic:
   max_length: 2048
   dtype: bf16
 
+critics: null
 
 dataset:
   name: house_build
