@@ -198,12 +198,11 @@ def main() -> int:
         for item in args.override:
             if item is None:
                 continue
-            for part in str(item).split(","):
-                part = part.strip()
-                if part:
-                    override_items.append(part)
+            part = str(item).strip()
+            if part:
+                override_items.append(part)
     if override_items:
-        cfg = apply_overrides(cfg, ",".join(override_items))
+        cfg = apply_overrides(cfg, override_items)
     apply_prompt_defaults(cfg)
 
     seed_val = cfg.get("seed", None)
