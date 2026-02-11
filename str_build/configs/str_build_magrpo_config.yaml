@@ -16,7 +16,8 @@ dataset:
   name: str_build
   type: str_build
   csv_path: ../dataset/data.csv
-  train_split: "[:]"
+  train_split: "[:8]"
+  eval_split: "[8:]"
   spacing: 2
   local_z: 0
 

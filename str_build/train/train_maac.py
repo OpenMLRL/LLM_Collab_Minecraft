@@ -41,17 +41,38 @@ def _slice_items(items: List[Dict[str, Any]], split_expr: Any) -> List[Dict[str,
     s = str(split_expr).strip()
     if not s:
         return items
-    m = re.search(r"\[\s*(?P<start>-?\d*)\s*:\s*(?P<end>-?\d*)\s*\]", s)
+    m = re.search(r"\[\s*(?P<start>-?[^:\]]*)\s*:\s*(?P<end>-?[^\]]*)\s*\]", s)
     if not m and ":" in s:
-        m = re.match(r"\s*(?P<start>-?\d*)\s*:\s*(?P<end>-?\d*)\s*$", s)
+        m = re.match(r"\s*(?P<start>-?[^:]*)\s*:\s*(?P<end>-?.*)\s*$", s)
     if not m:
         return items
-    start_raw = m.group("start")
-    end_raw = m.group("end")
-    start = int(start_raw) if start_raw not in (None, "", "+") else None
-    end = int(end_raw) if end_raw not in (None, "", "+") else None
-    return items[slice(start, end)]
+    start_raw = (m.group("start") or "").strip()
+    end_raw = (m.group("end") or "").strip()
+    total = len(items)
 
+    def _parse_index(raw: str):
+        if raw in ("", "+"):
+            return None
+        if raw.endswith("%"):
+            try:
+                pct = float(raw[:-1].strip())
+            except ValueError:
+                return None
+            return int(total * pct / 100.0)
+        try:
+            return int(raw)
+        except ValueError:
+            try:
+                frac = float(raw)
+            except ValueError:
+                return None
+            if 0 <= frac <= 1:
+                return int(total * frac)
+            return None
+
+    start = _parse_index(start_raw)
+    end = _parse_index(end_raw)
+    return items[slice(start, end)]
 
 def _map_dtype(dtype_cfg: Any) -> Any:
     if isinstance(dtype_cfg, torch.dtype):

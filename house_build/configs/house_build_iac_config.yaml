@@ -22,7 +22,8 @@ dataset:
   name: house_build
   type: house_build
   json_path: ../dataset/data.json
-  train_split: "[:]"
+  train_split: "[:8]"
+  eval_split: "[8:]"
 
 output:
   base_dir: output
