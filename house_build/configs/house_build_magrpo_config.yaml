@@ -48,7 +48,7 @@ magrpo:
   rollout_buffer_size: 1
   train_batch_size: 1
   advantage_normalization: true
-  eval_interval: 10
+  eval_interval: 2
   eval_num_samples: 2
   eval_batch_size: 1
 
