@@ -50,17 +50,38 @@ def _slice_items(items: List[Dict[str, Any]], split_expr: Any) -> List[Dict[str,
     s = str(split_expr).strip()
     if not s:
         return items
-    m = re.search(r"\[\s*(?P<start>-?\d*)\s*:\s*(?P<end>-?\d*)\s*\]", s)
+    m = re.search(r"\[\s*(?P<start>-?[^:\]]*)\s*:\s*(?P<end>-?[^\]]*)\s*\]", s)
     if not m and ":" in s:
-        m = re.match(r"\s*(?P<start>-?\d*)\s*:\s*(?P<end>-?\d*)\s*$", s)
+        m = re.match(r"\s*(?P<start>-?[^:]*)\s*:\s*(?P<end>-?.*)\s*$", s)
     if not m:
         return items
-    start_raw = m.group("start")
-    end_raw = m.group("end")
-    start = int(start_raw) if start_raw not in (None, "", "+") else None
-    end = int(end_raw) if end_raw not in (None, "", "+") else None
-    return items[slice(start, end)]
+    start_raw = (m.group("start") or "").strip()
+    end_raw = (m.group("end") or "").strip()
+    total = len(items)
 
+    def _parse_index(raw: str):
+        if raw in ("", "+"):
+            return None
+        if raw.endswith("%"):
+            try:
+                pct = float(raw[:-1].strip())
+            except ValueError:
+                return None
+            return int(total * pct / 100.0)
+        try:
+            return int(raw)
+        except ValueError:
+            try:
+                frac = float(raw)
+            except ValueError:
+                return None
+            if 0 <= frac <= 1:
+                return int(total * frac)
+            return None
+
+    start = _parse_index(start_raw)
+    end = _parse_index(end_raw)
+    return items[slice(start, end)]
 
 def _map_dtype(dtype_cfg: Any) -> Any:
     if isinstance(dtype_cfg, torch.dtype):
@@ -333,12 +354,11 @@ def main() -> int:
         for item in args.override:
             if item is None:
                 continue
-            for part in str(item).split(","):
-                part = part.strip()
-                if part:
-                    override_items.append(part)
+            part = str(item).strip()
+            if part:
+                override_items.append(part)
     if override_items:
-        cfg = apply_overrides(cfg, ",".join(override_items))
+        cfg = apply_overrides(cfg, override_items)
     apply_prompt_defaults(cfg)
 
     seed_val = cfg.get("seed", None)
@@ -387,24 +407,48 @@ def main() -> int:
     train_ds = Dataset.from_list(train_items)
     eval_ds = Dataset.from_list(eval_items) if eval_items else None
 
-    model_cfg = cfg.get("model") or {}
+    model_cfg = cfg.get("agent_model") or {}
     if not isinstance(model_cfg, dict):
         model_cfg = {}
-    critic_cfg = cfg.get("critic") or {}
-    if not isinstance(critic_cfg, dict):
-        critic_cfg = {}
+    critic_model_cfg = cfg.get("critic_model") or {}
+    if not isinstance(critic_model_cfg, dict):
+        critic_model_cfg = {}
     model_name = str(model_cfg.get("name") or "")
-    if not model_name:
-        raise ValueError("model.name is required")
+    agent_names = cfg.get("agents")
+    if not model_name and not agent_names:
+        raise ValueError("agent_model.name or agents is required")
+    if agent_names is not None:
+        if not isinstance(agent_names, (list, tuple)) or not all(
+            isinstance(x, str) for x in agent_names
+        ):
+            raise ValueError("agents must be a list of model names.")
+        agent_names = [str(x) for x in agent_names]
+
+    critic_names = None
+    critics_field = cfg.get("critics")
+    if critics_field is not None:
+        if not isinstance(critics_field, (list, tuple)) or not all(
+            isinstance(x, str) for x in critics_field
+        ):
+            raise ValueError("critics must be a list of model names.")
+        critic_names = [str(x) for x in critics_field]
     model_kwargs: Dict[str, Any] = {}
 
     dtype = _map_dtype(model_cfg.get("dtype") or model_cfg.get("torch_dtype"))
     if dtype is not None:
         model_kwargs["torch_dtype"] = dtype
 
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
+    tokenizer_source = agent_names[0] if agent_names else model_name
+    if not tokenizer_source:
+        raise ValueError("agent_model.name or agents must be provided.")
+    if agent_names:
+        tokenizers = [AutoTokenizer.from_pretrained(name) for name in agent_names]
+    else:
+        tokenizers = [AutoTokenizer.from_pretrained(tokenizer_source)]
+    for tok in tokenizers:
+        if tok.pad_token is None:
+            tok.pad_token = tok.eos_token
+    tokenizer = tokenizers[0]
 
     iac_args = get_iac_args(cfg, model_name=model_name)
     formatters = _build_formatters(cfg, num_agents=num_agents, tokenizer=tokenizer)
@@ -594,14 +638,15 @@ def main() -> int:
     except Exception:
         is_multi_turn = False
     critic_model_kwargs: Dict[str, Any] = {}
-    if isinstance(critic_cfg, dict):
-        critic_dtype = _map_dtype(critic_cfg.get("dtype") or critic_cfg.get("torch_dtype"))
+    if isinstance(critic_model_cfg, dict):
+        critic_dtype = _map_dtype(
+            critic_model_cfg.get("dtype") or critic_model_cfg.get("torch_dtype")
+        )
         if critic_dtype is not None:
             critic_model_kwargs["torch_dtype"] = critic_dtype
 
     trainer_kwargs: Dict[str, Any] = {
-        "model": model_name,
-        "tokenizer": tokenizer,
+        "tokenizer": tokenizers if agent_names else tokenizer,
         "reward_func": reward_func,
         "formatters": formatters,
         "args": iac_args,
@@ -615,15 +660,14 @@ def main() -> int:
         },
         "wandb_config": wandb_config,
     }
-    critics = None
-    if bool(getattr(iac_args, "use_separate_critic", True)):
-        critic_name = str(critic_cfg.get("name") or "").strip()
-        if not critic_name:
-            raise ValueError("critic.name must be provided when use_separate_critic is true")
-        num_agents_val = int(getattr(iac_args, "num_agents", 1))
-        critics = [critic_name] * num_agents_val
-    if critics is not None:
-        trainer_kwargs["critics"] = critics
+    trainer_kwargs["agent_model"] = model_name or None
+    if agent_names:
+        trainer_kwargs["agents"] = agent_names
+    critic_name = str(critic_model_cfg.get("name") or "").strip() or None
+    if critic_name:
+        trainer_kwargs["critic_model"] = critic_name
+    if critic_names:
+        trainer_kwargs["critics"] = critic_names
     if reward_processor is not None:
         trainer_kwargs["reward_processor"] = reward_processor
 

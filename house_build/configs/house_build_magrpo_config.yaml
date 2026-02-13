@@ -1,4 +1,4 @@
-model:
+agent_model:
   name: Qwen/Qwen3-4B-Instruct-2507
   type: qwen
   temperature: 0.6
@@ -6,11 +6,18 @@ model:
   max_length: 2048
   dtype: bf16
 
+agents: null
+
+critic_model: null
+
+critics: null
+
 dataset:
   name: house_build
   type: house_build
   json_path: ../dataset/data.json
-  train_split: "[:]"
+  train_split: "[:8]"
+  eval_split: "[8:]"
 
 output:
   base_dir: output
@@ -41,8 +48,8 @@ magrpo:
   rollout_buffer_size: 1
   train_batch_size: 1
   advantage_normalization: true
-  eval_interval: 0
-  eval_num_samples: 0
+  eval_interval: 2
+  eval_num_samples: 2
   eval_batch_size: 1
 
 reward_processor:

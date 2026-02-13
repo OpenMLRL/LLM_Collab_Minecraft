@@ -41,17 +41,38 @@ def _slice_items(items: List[Dict[str, Any]], split_expr: Any) -> List[Dict[str,
     s = str(split_expr).strip()
     if not s:
         return items
-    m = re.search(r"\[\s*(?P<start>-?\d*)\s*:\s*(?P<end>-?\d*)\s*\]", s)
+    m = re.search(r"\[\s*(?P<start>-?[^:\]]*)\s*:\s*(?P<end>-?[^\]]*)\s*\]", s)
     if not m and ":" in s:
-        m = re.match(r"\s*(?P<start>-?\d*)\s*:\s*(?P<end>-?\d*)\s*$", s)
+        m = re.match(r"\s*(?P<start>-?[^:]*)\s*:\s*(?P<end>-?.*)\s*$", s)
     if not m:
         return items
-    start_raw = m.group("start")
-    end_raw = m.group("end")
-    start = int(start_raw) if start_raw not in (None, "", "+") else None
-    end = int(end_raw) if end_raw not in (None, "", "+") else None
-    return items[slice(start, end)]
+    start_raw = (m.group("start") or "").strip()
+    end_raw = (m.group("end") or "").strip()
+    total = len(items)
 
+    def _parse_index(raw: str):
+        if raw in ("", "+"):
+            return None
+        if raw.endswith("%"):
+            try:
+                pct = float(raw[:-1].strip())
+            except ValueError:
+                return None
+            return int(total * pct / 100.0)
+        try:
+            return int(raw)
+        except ValueError:
+            try:
+                frac = float(raw)
+            except ValueError:
+                return None
+            if 0 <= frac <= 1:
+                return int(total * frac)
+            return None
+
+    start = _parse_index(start_raw)
+    end = _parse_index(end_raw)
+    return items[slice(start, end)]
 
 def _map_dtype(dtype_cfg: Any) -> Any:
     if isinstance(dtype_cfg, torch.dtype):
@@ -198,12 +219,11 @@ def main() -> int:
         for item in args.override:
             if item is None:
                 continue
-            for part in str(item).split(","):
-                part = part.strip()
-                if part:
-                    override_items.append(part)
+            part = str(item).strip()
+            if part:
+                override_items.append(part)
     if override_items:
-        cfg = apply_overrides(cfg, ",".join(override_items))
+        cfg = apply_overrides(cfg, override_items)
     apply_prompt_defaults(cfg)
 
     seed_val = cfg.get("seed", None)
@@ -254,26 +274,46 @@ def main() -> int:
     train_ds = Dataset.from_list(train_items)
     eval_ds = Dataset.from_list(eval_items) if eval_items else None
 
-    model_cfg = cfg.get("model") or {}
+    model_cfg = cfg.get("agent_model") or {}
     if not isinstance(model_cfg, dict):
         model_cfg = {}
     model_name = str(model_cfg.get("name") or "")
-    if not model_name:
-        raise ValueError("model.name is required")
+    agent_names = cfg.get("agents")
+    if not model_name and not agent_names:
+        raise ValueError("agent_model.name or agents is required")
+    if agent_names is not None:
+        if not isinstance(agent_names, (list, tuple)) or not all(
+            isinstance(x, str) for x in agent_names
+        ):
+            raise ValueError("agents must be a list of model names.")
+        agent_names = [str(x) for x in agent_names]
     model_kwargs: Dict[str, Any] = {}
 
     dtype = _map_dtype(model_cfg.get("dtype") or model_cfg.get("torch_dtype"))
     if dtype is not None:
         model_kwargs["torch_dtype"] = dtype
 
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
+    tokenizer_source = agent_names[0] if agent_names else model_name
+    if not tokenizer_source:
+        raise ValueError("agent_model.name or agents must be provided.")
+    if agent_names:
+        tokenizers = [AutoTokenizer.from_pretrained(name) for name in agent_names]
+    else:
+        tokenizers = [AutoTokenizer.from_pretrained(tokenizer_source)]
+    for tok in tokenizers:
+        if tok.pad_token is None:
+            tok.pad_token = tok.eos_token
+    tokenizer = tokenizers[0]
 
     agents = []
-    for _ in range(num_agents):
-        agent = AutoModelForCausalLM.from_pretrained(model_name, **model_kwargs)
-        agents.append(agent)
+    if agent_names:
+        for name in agent_names:
+            agent = AutoModelForCausalLM.from_pretrained(name, **model_kwargs)
+            agents.append(agent)
+    else:
+        for _ in range(num_agents):
+            agent = AutoModelForCausalLM.from_pretrained(model_name, **model_kwargs)
+            agents.append(agent)
 
     magrpo_args = get_trainer_args(cfg)
     formatters = _build_formatters(cfg, num_agents=num_agents, tokenizer=tokenizer)
@@ -333,7 +373,7 @@ def main() -> int:
             "tags": tags,
             "config_sections": {
                 "dataset": dataset_cfg,
-                "model": model_cfg,
+                "agent_model": model_cfg,
                 "output": output_cfg,
                 "external": external_cfg,
                 "trainer": magrpo_cfg,
@@ -353,6 +393,7 @@ def main() -> int:
         is_multi_turn = False
 
     trainer_kwargs: Dict[str, Any] = {
+        "agent_model": model_name or None,
         "agents": agents,
         "num_agents": num_agents,
         "reward_func": reward_func,
@@ -360,7 +401,7 @@ def main() -> int:
         "args": magrpo_args,
         "train_dataset": train_ds,
         "eval_dataset": eval_ds,
-        "tokenizer": tokenizer,
+        "tokenizer": tokenizers if agent_names else tokenizer,
         "wandb_config": wandb_config,
         "dataset_type": str(dataset_cfg.get("type") or "str_build"),
     }
