@@ -86,6 +86,19 @@ def _as_bool(x: Any, default: bool) -> bool:
     return bool(x)
 
 
+def _as_device_spec(x: Any) -> Any:
+    if x is None:
+        return None
+    if isinstance(x, str):
+        s = x.strip()
+        if s.lower() in ("none", "null", ""):
+            return None
+        return s
+    if isinstance(x, (list, tuple)):
+        return [str(v) for v in x]
+    return str(x)
+
+
 def get_trainer_args(cfg: Dict[str, Any]) -> MAGRPOConfig:
     tr = cfg.get("magrpo") or {}
     if not isinstance(tr, dict):
@@ -114,6 +127,8 @@ def get_trainer_args(cfg: Dict[str, Any]) -> MAGRPOConfig:
         candidate["top_k"] = _as_opt_int(tr.get("top_k", None), None)
     candidate.update(
         {
+            "parallel_mode": str(tr.get("parallel_mode", "auto")).strip().lower(),
+            "agent_devices": _as_device_spec(tr.get("agent_devices", None)),
             "discount": _as_float(tr.get("discount", tr.get("gamma", 0.9)), 0.9),
             "joint_mode": joint_mode_str,
         }
@@ -172,6 +187,9 @@ def get_maac_args(cfg: Dict[str, Any], *, model_name: Optional[str] = None) -> M
         "top_k": _as_opt_int(tr.get("top_k", None), None),
         "num_agents": _as_int(tr.get("num_agents", 2), 2),
         "num_generations": _as_int(tr.get("num_generations", 1), 1),
+        "parallel_mode": str(tr.get("parallel_mode", "auto")).strip().lower(),
+        "agent_devices": _as_device_spec(tr.get("agent_devices", None)),
+        "critic_devices": _as_device_spec(tr.get("critic_devices", None)),
         "discount": _as_float(tr.get("discount", 0.9), 0.9),
         "critic_type": str(tr.get("critic_type", "v")),
         "early_termination_threshold": _as_opt_float(
@@ -221,6 +239,9 @@ def get_iac_args(cfg: Dict[str, Any], *, model_name: Optional[str] = None) -> IA
         "num_agents": _as_int(tr.get("num_agents", 2), 2),
         "num_generations": _as_int(tr.get("num_generations", 1), 1),
         "use_separate_critic": use_separate_critic,
+        "parallel_mode": str(tr.get("parallel_mode", "auto")).strip().lower(),
+        "agent_devices": _as_device_spec(tr.get("agent_devices", None)),
+        "critic_devices": _as_device_spec(tr.get("critic_devices", None)),
         "critic_value_head_hidden_dim": _as_opt_int(
             tr.get("critic_value_head_hidden_dim", None), None
         ),
