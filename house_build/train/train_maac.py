@@ -17,6 +17,9 @@ except Exception as e:  # pragma: no cover
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(REPO_ROOT))
+COMLRL_ROOT = os.path.join(os.path.dirname(REPO_ROOT), "CoMLRL")
+if COMLRL_ROOT not in sys.path:
+    sys.path.insert(0, COMLRL_ROOT)
 
 from datasets import Dataset  # type: ignore
 from transformers import AutoTokenizer  # type: ignore
