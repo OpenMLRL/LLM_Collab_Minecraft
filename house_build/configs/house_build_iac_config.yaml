@@ -3,6 +3,7 @@ agent_model:
   type: qwen
   temperature: 0.6
   top_p: 0.6
+  top_k: null
   max_length: 2048
   dtype: bf16
 
@@ -11,8 +12,6 @@ agents: null
 critic_model:
   name: "Qwen/Qwen3-4B-Instruct-2507"
   type: qwen
-  temperature: 0.6
-  top_p: 0.6
   max_length: 2048
   dtype: bf16
 
@@ -49,9 +48,6 @@ iac:
   rollout_buffer_size: 1
   train_batch_size: 1
   max_new_tokens: 512
-  temperature: 0.6
-  top_p: 0.6
-  top_k: null
   use_separate_critic: true
   discount: 0.9
   early_termination_threshold: 0.0

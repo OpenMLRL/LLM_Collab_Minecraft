@@ -44,7 +44,10 @@ from LLM_Collab_Minecraft.house_build.utils.house_builder import (
 )
 from LLM_Collab_Minecraft.house_build.utils.config import apply_overrides, load_yaml, resolve_path
 from LLM_Collab_Minecraft.house_build.utils.prompting import apply_prompt_defaults
-from LLM_Collab_Minecraft.house_build.utils.trainer_args import get_trainer_args
+from LLM_Collab_Minecraft.house_build.utils.trainer_args import (
+    get_trainer_args,
+    get_agent_sampling_config,
+)
 
 
 def _slice_items(items: List[Dict[str, Any]], split_expr: Any) -> List[Dict[str, Any]]:
@@ -451,7 +454,8 @@ def main() -> int:
             agent = AutoModelForCausalLM.from_pretrained(model_name, **model_kwargs)
             agents.append(agent)
 
-    magrpo_args = get_trainer_args(cfg)
+    sampling_cfg = get_agent_sampling_config(cfg)
+    magrpo_args = get_trainer_args(cfg, sampling_cfg=sampling_cfg)
     formatters = _build_formatters(cfg, num_agents=num_agents, tokenizer=tokenizer)
     reward_func = get_reward_function(cfg=cfg, num_agents=num_agents)
 

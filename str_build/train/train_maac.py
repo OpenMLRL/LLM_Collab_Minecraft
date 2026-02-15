@@ -35,7 +35,10 @@ from LLM_Collab_Minecraft.str_build.rewards.str_builder_reward import get_reward
 from LLM_Collab_Minecraft.str_build.utils.config import apply_overrides, load_yaml, resolve_path
 from LLM_Collab_Minecraft.str_build.utils.prompting import apply_graph_setting, apply_prompt_defaults
 from LLM_Collab_Minecraft.str_build.utils.str_builder import load_tasks_from_csv
-from LLM_Collab_Minecraft.str_build.utils.trainer_args import get_maac_args
+from LLM_Collab_Minecraft.str_build.utils.trainer_args import (
+    get_maac_args,
+    get_agent_sampling_config,
+)
 
 
 def _slice_items(items: List[Dict[str, Any]], split_expr: Any) -> List[Dict[str, Any]]:
@@ -320,7 +323,8 @@ def main() -> int:
             tok.pad_token = tok.eos_token
     tokenizer = tokenizers[0]
 
-    maac_args = get_maac_args(cfg, model_name=model_name)
+    sampling_cfg = get_agent_sampling_config(cfg)
+    maac_args = get_maac_args(cfg, sampling_cfg=sampling_cfg)
     formatters = _build_formatters(cfg, num_agents=num_agents, tokenizer=tokenizer)
     prompt_to_item: Dict[str, Dict[str, Any]] = {}
     dataset_prompt_map: Dict[str, Dict[str, Any]] = {}

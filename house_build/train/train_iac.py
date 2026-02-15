@@ -44,7 +44,10 @@ from LLM_Collab_Minecraft.house_build.utils.house_builder import (
 )
 from LLM_Collab_Minecraft.house_build.utils.config import apply_overrides, load_yaml, resolve_path
 from LLM_Collab_Minecraft.house_build.utils.prompting import apply_prompt_defaults
-from LLM_Collab_Minecraft.house_build.utils.trainer_args import get_iac_args
+from LLM_Collab_Minecraft.house_build.utils.trainer_args import (
+    get_iac_args,
+    get_agent_sampling_config,
+)
 
 
 def _slice_items(items: List[Dict[str, Any]], split_expr: Any) -> List[Dict[str, Any]]:
@@ -453,7 +456,8 @@ def main() -> int:
             tok.pad_token = tok.eos_token
     tokenizer = tokenizers[0]
 
-    iac_args = get_iac_args(cfg, model_name=model_name)
+    sampling_cfg = get_agent_sampling_config(cfg)
+    iac_args = get_iac_args(cfg, sampling_cfg=sampling_cfg)
     formatters = _build_formatters(cfg, num_agents=num_agents, tokenizer=tokenizer)
     prompt_to_item: Dict[str, Dict[str, Any]] = {}
     dataset_prompt_map: Dict[str, Dict[str, Any]] = {}
