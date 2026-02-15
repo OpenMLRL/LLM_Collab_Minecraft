@@ -39,6 +39,7 @@ external:
   previous_response: true
 
 maac:
+  parallel_training: auto
   num_agents: 2
   num_turns: 4
   critic_type: v

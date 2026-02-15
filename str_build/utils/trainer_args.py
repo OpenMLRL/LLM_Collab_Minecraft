@@ -127,7 +127,7 @@ def get_trainer_args(cfg: Dict[str, Any]) -> MAGRPOConfig:
         candidate["top_k"] = _as_opt_int(tr.get("top_k", None), None)
     candidate.update(
         {
-            "parallel_mode": str(tr.get("parallel_mode", "auto")).strip().lower(),
+            "parallel_training": str(tr.get("parallel_training", "auto")).strip().lower(),
             "agent_devices": _as_device_spec(tr.get("agent_devices", None)),
             "discount": _as_float(tr.get("discount", 0.9), 0.9),
             "joint_mode": joint_mode_str,
@@ -187,7 +187,7 @@ def get_maac_args(cfg: Dict[str, Any], *, model_name: Optional[str] = None) -> M
         "top_k": _as_opt_int(tr.get("top_k", None), None),
         "num_agents": _as_int(tr.get("num_agents", 2), 2),
         "num_generations": _as_int(tr.get("num_generations", 1), 1),
-        "parallel_mode": str(tr.get("parallel_mode", "auto")).strip().lower(),
+        "parallel_training": str(tr.get("parallel_training", "auto")).strip().lower(),
         "agent_devices": _as_device_spec(tr.get("agent_devices", None)),
         "critic_devices": _as_device_spec(tr.get("critic_devices", None)),
         "discount": _as_float(tr.get("discount", 0.9), 0.9),
@@ -239,7 +239,7 @@ def get_iac_args(cfg: Dict[str, Any], *, model_name: Optional[str] = None) -> IA
         "num_agents": _as_int(tr.get("num_agents", 2), 2),
         "num_generations": _as_int(tr.get("num_generations", 1), 1),
         "use_separate_critic": use_separate_critic,
-        "parallel_mode": str(tr.get("parallel_mode", "auto")).strip().lower(),
+        "parallel_training": str(tr.get("parallel_training", "auto")).strip().lower(),
         "agent_devices": _as_device_spec(tr.get("agent_devices", None)),
         "critic_devices": _as_device_spec(tr.get("critic_devices", None)),
         "critic_value_head_hidden_dim": _as_opt_int(

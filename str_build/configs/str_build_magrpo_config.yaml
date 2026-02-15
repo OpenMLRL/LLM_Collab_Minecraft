@@ -33,6 +33,7 @@ external:
   previous_response: true
 
 magrpo:
+  parallel_training: auto
   num_agents: 2
   num_turns: 4
   num_train_epochs: 20
