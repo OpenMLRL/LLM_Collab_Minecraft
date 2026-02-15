@@ -23,9 +23,9 @@ dataset:
   local_z: 0
 
 output:
-  base_dir: output
+  base_dir: output_magrpo_str_build
   save_final_model: false
-  save_path: output/final_model
+  save_path: output_magrpo_str_build
   verbose: false
 
 external:
@@ -61,7 +61,7 @@ wandb:
   project: str_build
   entity: OpenMLRL
   run_name: str_build_magrpo
-  dir: output
+  dir: output_magrpo_str_build
   tags: ["magrpo", "str_build"]
 
 prompt:

@@ -25,9 +25,9 @@ dataset:
   eval_split: "[8:]"
 
 output:
-  base_dir: output
+  base_dir: output_iac_house_build
   save_final_model: false
-  save_path: output/final_model
+  save_path: output_iac_house_build
   verbose: false
 
 external:
@@ -65,7 +65,7 @@ wandb:
   project: house_build
   entity: OpenMLRL
   run_name: house_build_iac
-  dir: output
+  dir: output_iac_house_build
   tags: ["iac", "house_build"]
 
 prompt:

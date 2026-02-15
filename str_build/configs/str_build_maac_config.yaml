@@ -27,9 +27,9 @@ dataset:
   local_z: 0
 
 output:
-  base_dir: output
+  base_dir: output_maac_str_build
   save_final_model: false
-  save_path: output/final_model
+  save_path: output_maac_str_build
   verbose: false
 
 external:
@@ -65,7 +65,7 @@ wandb:
   project: str_build
   entity: OpenMLRL
   run_name: str_build_maac
-  dir: output
+  dir: output_maac_str_build
   tags: ["maac", "str_build"]
 
 prompt:
