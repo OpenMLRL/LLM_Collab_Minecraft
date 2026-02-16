@@ -22,7 +22,7 @@ if COMLRL_ROOT not in sys.path:
     sys.path.insert(0, COMLRL_ROOT)
 
 from datasets import Dataset  # type: ignore
-from transformers import AutoModelForCausalLM, AutoTokenizer  # type: ignore
+from transformers import AutoTokenizer  # type: ignore
 import torch  # type: ignore
 
 from comlrl.trainers.reinforce import MAGRPOTrainer  # type: ignore
@@ -426,11 +426,7 @@ def main() -> int:
         ):
             raise ValueError("agents must be a list of model names.")
         agent_names = [str(x) for x in agent_names]
-    model_kwargs: Dict[str, Any] = {}
-
     dtype = _map_dtype(model_cfg.get("dtype") or model_cfg.get("torch_dtype"))
-    if dtype is not None:
-        model_kwargs["torch_dtype"] = dtype
 
     tokenizer_source = agent_names[0] if agent_names else model_name
     if not tokenizer_source:
@@ -443,16 +439,6 @@ def main() -> int:
         if tok.pad_token is None:
             tok.pad_token = tok.eos_token
     tokenizer = tokenizers[0]
-
-    agents = []
-    if agent_names:
-        for name in agent_names:
-            agent = AutoModelForCausalLM.from_pretrained(name, **model_kwargs)
-            agents.append(agent)
-    else:
-        for _ in range(num_agents):
-            agent = AutoModelForCausalLM.from_pretrained(model_name, **model_kwargs)
-            agents.append(agent)
 
     sampling_cfg = get_agent_sampling_config(cfg)
     magrpo_args = get_trainer_args(cfg, sampling_cfg=sampling_cfg)
@@ -534,8 +520,12 @@ def main() -> int:
 
     trainer_kwargs: Dict[str, Any] = {
         "agent_model": model_name or None,
-        "agents": agents,
+        "agents": agent_names,
         "num_agents": num_agents,
+        "model_config": {
+            "torch_dtype": dtype,
+            "special_tokens": model_cfg.get("special_tokens", {}),
+        },
         "reward_func": reward_func,
         "formatters": formatters,
         "args": magrpo_args,
