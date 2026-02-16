@@ -32,6 +32,7 @@ external:
   mode: position_feedback
   original_prompt: true
   previous_response: true
+  external_prompt_passthrough: false
 
 magrpo:
   parallel_training: none

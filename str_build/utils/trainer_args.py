@@ -142,6 +142,9 @@ def get_trainer_args(cfg: Dict[str, Any], *, sampling_cfg: Dict[str, Any]) -> MA
     tr = cfg.get("magrpo") or {}
     if not isinstance(tr, dict):
         tr = {}
+    ext = cfg.get("external") or {}
+    if not isinstance(ext, dict):
+        ext = {}
 
     lr_val = tr.get("agent_learning_rate", 5e-6)
 
@@ -184,6 +187,9 @@ def get_trainer_args(cfg: Dict[str, Any], *, sampling_cfg: Dict[str, Any]) -> MA
             "eval_interval": _as_int(tr.get("eval_interval", 2), 2),
             "eval_num_samples": _as_int(tr.get("eval_num_samples", 2), 2),
             "eval_batch_size": _as_int(tr.get("eval_batch_size", 1), 1),
+            "external_prompt_passthrough": _as_bool(
+                ext.get("external_prompt_passthrough", False), False
+            ),
         }
     )
 
@@ -205,6 +211,9 @@ def get_maac_args(cfg: Dict[str, Any], *, sampling_cfg: Dict[str, Any]) -> MAACC
     tr = cfg.get("maac") or {}
     if not isinstance(tr, dict):
         tr = {}
+    ext = cfg.get("external") or {}
+    if not isinstance(ext, dict):
+        ext = {}
 
     adv_norm = tr.get("advantage_normalization", tr.get("normalize_advantage", True))
 
@@ -228,6 +237,9 @@ def get_maac_args(cfg: Dict[str, Any], *, sampling_cfg: Dict[str, Any]) -> MAACC
         "agent_devices": _as_device_spec(tr.get("agent_devices", ["cuda:0"])),
         "critic_devices": _as_device_spec(tr.get("critic_devices", ["cuda:0"])),
         "discount": _as_float(tr.get("discount", 0.9), 0.9),
+        "external_prompt_passthrough": _as_bool(
+            ext.get("external_prompt_passthrough", False), False
+        ),
         "critic_type": str(tr.get("critic_type", "v")),
         "early_termination_threshold": _as_opt_float(
             tr.get("early_termination_threshold", -0.1), -0.1
@@ -254,6 +266,9 @@ def get_iac_args(cfg: Dict[str, Any], *, sampling_cfg: Dict[str, Any]) -> IACCon
     tr = cfg.get("iac") or {}
     if not isinstance(tr, dict):
         tr = {}
+    ext = cfg.get("external") or {}
+    if not isinstance(ext, dict):
+        ext = {}
 
     use_separate_critic = _as_bool(tr.get("use_separate_critic", True), True)
     adv_norm = tr.get("advantage_normalization", tr.get("normalize_advantage", True))
@@ -284,6 +299,9 @@ def get_iac_args(cfg: Dict[str, Any], *, sampling_cfg: Dict[str, Any]) -> IACCon
         ),
         "value_head_hidden_dim": _as_opt_int(tr.get("value_head_hidden_dim", None), None),
         "discount": _as_float(tr.get("discount", 0.9), 0.9),
+        "external_prompt_passthrough": _as_bool(
+            ext.get("external_prompt_passthrough", False), False
+        ),
         "early_termination_threshold": _as_opt_float(
             tr.get("early_termination_threshold", -0.1), -0.1
         ),

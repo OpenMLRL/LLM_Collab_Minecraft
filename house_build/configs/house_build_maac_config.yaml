@@ -35,6 +35,7 @@ external:
   original_prompt: true
   previous_response: true
   lim: 20
+  external_prompt_passthrough: false
 
 maac:
   parallel_training: none
