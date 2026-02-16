@@ -10,7 +10,7 @@ agent_model:
 agents: null
 
 critic_model:
-  name: "Qwen/Qwen3-4B-Instruct-2507"
+  name: Qwen/Qwen3-4B-Instruct-2507
   type: qwen
   max_length: 2048
   dtype: bf16
@@ -20,17 +20,32 @@ critics: null
 dataset:
   name: str_build
   type: str_build
+  train_split: '[:8]'
+  eval_split: '[8:]'
   csv_path: ../dataset/data.csv
-  train_split: "[:8]"
-  eval_split: "[8:]"
-  spacing: 2
   local_z: 0
+  spacing: 2
+
+prompt:
+  use_chat_template: true
+  provide_graph: false
+
+task:
+  max_commands: 300
+  block_agent1:
+  - oak_planks
+  - stone
+  - air
+  block_agent2:
+  - white_concrete
+  - obsidian
+  - air
 
 output:
   base_dir: output_iac_str_build
+  verbose: false
   save_final_model: false
   save_path: output_iac_str_build
-  verbose: false
 
 external:
   mode: position_feedback
@@ -40,19 +55,21 @@ external:
 
 iac:
   parallel_training: none
-  agent_devices: ["cuda:0"]
-  critic_devices: ["cuda:0"]
+  agent_devices:
+  - cuda:0
+  critic_devices:
+  - cuda:0
   num_agents: 2
   num_turns: 4
+  use_separate_critic: true
   num_train_epochs: 150
-  agent_learning_rate: 2.5e-6
-  critic_learning_rate: 2.5e-6
+  agent_learning_rate: 2.5e-06
+  critic_learning_rate: 2.5e-06
   value_loss_coef: 0.6
   value_clip_range: 0.05
   rollout_buffer_size: 1
   train_batch_size: 1
   max_new_tokens: 512
-  use_separate_critic: true
   discount: 0.9
   early_termination_threshold: -0.1
   eval_interval: 10
@@ -70,13 +87,6 @@ wandb:
   entity: OpenMLRL
   run_name: str_build_iac
   dir: output_iac_str_build
-  tags: ["iac", "str_build"]
-
-prompt:
-  provide_graph: false
-  use_chat_template: true
-
-task:
-  block_agent1: [oak_planks, stone, air]
-  block_agent2: [white_concrete, obsidian, air]
-  max_commands: 300
+  tags:
+  - iac
+  - str_build
