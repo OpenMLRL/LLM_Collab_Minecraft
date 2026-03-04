@@ -1,0 +1,10 @@
+[
+  {
+    "task_id": "bridge_build_0001",
+    "map": "#S##\n....\nN...\n...Y\n....\nY...\n...N\n....\n##T#"
+  },
+  {
+    "task_id": "bridge_build_0002",
+    "map": "##S##\n.....\n..N..\n.....\n.Y.Y.\n.....\n..N..\n.....\n##T##"
+  }
+]

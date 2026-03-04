@@ -31,6 +31,7 @@ npm install
 
 - **StrBuild**: agents build structures from string blueprints.
 - **HouseBuild**: agents construct houses from layered blueprints under resource limits and spider attacks.
+- **BridgeBuild**: two agents collaboratively build a bridge between two anchored banks under fog-of-war, probe, and communication costs.
 
 ## Training Scripts
 
@@ -48,6 +49,14 @@ HouseBuild:
 python3 house_build/train/train_magrpo.py --config house_build/configs/house_build_magrpo_config.yaml
 python3 house_build/train/train_iac.py --config house_build/configs/house_build_iac_config.yaml
 python3 house_build/train/train_maac.py --config house_build/configs/house_build_maac_config.yaml
+```
+
+BridgeBuild:
+
+```bash
+python3 bridge_build/train/train_magrpo.py --config bridge_build/configs/bridge_build_magrpo_config.yaml
+python3 bridge_build/train/train_iac.py --config bridge_build/configs/bridge_build_iac_config.yaml
+python3 bridge_build/train/train_maac.py --config bridge_build/configs/bridge_build_maac_config.yaml
 ```
 
 Override any configuration value inline with `--override`:
@@ -75,4 +84,10 @@ HouseBuild modes:
 - `position_modification`
 - `rect_modification`
 - `resource_schedule`
+- `score_feedback`
+
+BridgeBuild modes:
+
+- `perfect_feedback`
+- `position_feedback`
 - `score_feedback`
