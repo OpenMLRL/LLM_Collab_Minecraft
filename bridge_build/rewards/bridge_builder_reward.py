@@ -9,6 +9,7 @@ from LLM_Collab_Minecraft.bridge_build.utils.bridge_builder import (
     make_initial_state,
     task_from_item,
 )
+from LLM_Collab_Minecraft.bridge_build.utils.debug import print_turn_debug
 
 
 def _log_train_metrics(metrics: Mapping[str, float], *, turn_idx: int | None) -> None:
@@ -80,7 +81,7 @@ def get_reward_function(*, cfg: Dict[str, Any], num_agents: int) -> Callable[...
     output_cfg = cfg.get("output") or {}
     if not isinstance(output_cfg, dict):
         output_cfg = {}
-    debug_enabled = bool(output_cfg.get("verbose", False))
+    debug_enabled = bool(cfg.get("debug", False))
 
     def _compute(
         *,
@@ -129,15 +130,13 @@ def get_reward_function(*, cfg: Dict[str, Any], num_agents: int) -> Callable[...
         )
 
         if debug_enabled:
-            print(
-                "[bridge_build debug] "
-                f"task={task.task_id} turn={turn_idx} reward={reward:.4f} "
-                f"connected={bool(metrics.get('connected', False))} "
-                f"N_adj={int(metrics.get('n_adjacent_count', 0))} "
-                f"Y_uncovered={int(metrics.get('y_uncovered_count', 0))} "
-                f"probe={int(metrics.get('num_valid_probes', 0))} "
-                f"comm_tokens={int(metrics.get('comm_tokens', 0))}",
-                flush=True,
+            print_turn_debug(
+                task=task,
+                state=result.state,
+                turn_idx=turn_idx,
+                reward=reward,
+                metrics=metrics,
+                agent_outputs=list(completions),
             )
 
         return [reward]

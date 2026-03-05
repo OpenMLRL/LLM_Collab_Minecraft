@@ -19,6 +19,8 @@ critics: null
 
 seed: 42
 
+debug: false
+
 dataset:
   name: bridge_build
   type: bridge_build
