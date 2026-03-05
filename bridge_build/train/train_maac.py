@@ -245,11 +245,16 @@ def _build_formatters(
             use_chat_template=bool(prompt_ctx["use_chat_template"]),
         )
 
+    def _formatter(item: Dict[str, Any], *, idx: int, external_prompts: Any = None) -> str:
+        if external_prompts is not None:
+            return str(external_prompts)
+        return _render_item(item, idx)
+
     if n == 1:
-        return [lambda item, idx=0: _render_item(item, idx)]
+        return [lambda item, external_prompts=None, idx=0: _formatter(item, idx=idx, external_prompts=external_prompts)]
     return [
-        lambda item, idx=0: _render_item(item, idx),
-        lambda item, idx=1: _render_item(item, idx),
+        lambda item, external_prompts=None, idx=0: _formatter(item, idx=idx, external_prompts=external_prompts),
+        lambda item, external_prompts=None, idx=1: _formatter(item, idx=idx, external_prompts=external_prompts),
     ]
 
 
@@ -372,6 +377,7 @@ def main() -> int:
 
     prompt_registry: Dict[str, Dict[str, Any]] = {}
     dataset_prompt_map: Dict[str, Dict[str, Any]] = {}
+    dataset_payload_map: Dict[str, Dict[str, Any]] = {}
 
     critic_model_kwargs: Dict[str, Any] = {}
     if isinstance(critic_model_cfg, dict):
@@ -421,6 +427,8 @@ def main() -> int:
                 dataset_prompt_map[ds_key] = dict(item)
 
             payload = _payload_from_item(item)
+            if ds_key:
+                dataset_payload_map[ds_key] = copy.deepcopy(payload)
             if ds_key:
                 _register_prompt(str(item.get("prompt") or ""), item, payload, turn_idx)
 
@@ -562,6 +570,9 @@ def main() -> int:
     if is_multi_turn:
         def _resolver(prompt: str) -> Any:
             key = _normalize_key(prompt)
+            payload = dataset_payload_map.get(key)
+            if payload is not None:
+                return payload
             reg = prompt_registry.get(key)
             if reg is None:
                 return None
@@ -596,7 +607,7 @@ def main() -> int:
                 base_item = dataset_prompt_map.get(key)
                 if base_item is None:
                     return prompts
-                payload = _payload_from_item(base_item)
+                payload = dataset_payload_map.get(key) or _payload_from_item(base_item)
             else:
                 base_item = dict(reg.get("base_item") or {})
                 payload = dict(reg.get("payload") or {})
@@ -610,11 +621,17 @@ def main() -> int:
             except Exception:
                 next_payload = payload
 
+            ds_key = _normalize_key(str(base_item.get("prompt") or ""))
+            if ds_key:
+                dataset_payload_map[ds_key] = copy.deepcopy(next_payload)
+
             try:
                 turn_idx = int(len(prompt_history[0]) + 1) if prompt_history else 2
             except Exception:
                 turn_idx = int((reg or {}).get("item", {}).get("_bridge_build_turn", 1)) + 1
 
+            if ds_key:
+                _register_prompt(str(base_item.get("prompt") or ""), base_item, next_payload, turn_idx)
             if isinstance(prompts, (list, tuple)):
                 for p in prompts:
                     _register_prompt(str(p), base_item, next_payload, turn_idx)
