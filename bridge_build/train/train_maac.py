@@ -589,6 +589,17 @@ def main() -> int:
             n_agents = int(num_agents) if num_agents is not None else num_agents_default
             prompt_history = _kwargs.get("prompt_history_per_agent")
             response_history = _kwargs.get("response_history_per_agent")
+            ds_key = _normalize_key(str(prompt or ""))
+            base_item_for_reset = dataset_prompt_map.get(ds_key)
+
+            # Reset per-rollout state at the first external transition call of each rollout.
+            is_first_external_turn = False
+            try:
+                is_first_external_turn = bool(prompt_history) and len(prompt_history[0]) <= 1
+            except Exception:
+                is_first_external_turn = False
+            if is_first_external_turn and base_item_for_reset is not None:
+                dataset_payload_map[ds_key] = _payload_from_item(base_item_for_reset)
 
             prompts = external_get_transition(
                 prompt=prompt,
@@ -601,16 +612,21 @@ def main() -> int:
                 response_history_per_agent=response_history,
             )
 
-            key = _normalize_key(str(prompt or ""))
+            key = ds_key
             reg = prompt_registry.get(key)
-            if reg is None:
-                base_item = dataset_prompt_map.get(key)
-                if base_item is None:
-                    return prompts
-                payload = dataset_payload_map.get(key) or _payload_from_item(base_item)
-            else:
+            base_item = dataset_prompt_map.get(key)
+            if base_item is None and reg is not None:
                 base_item = dict(reg.get("base_item") or {})
-                payload = dict(reg.get("payload") or {})
+            if base_item is None:
+                return prompts
+
+            # The per-dataset payload map is the authoritative rollout state.
+            payload = dataset_payload_map.get(key)
+            if payload is None:
+                if reg is not None:
+                    payload = dict(reg.get("payload") or {})
+                else:
+                    payload = _payload_from_item(base_item)
 
             try:
                 next_payload, _metrics, _actions = transition_payload(
@@ -630,8 +646,6 @@ def main() -> int:
             except Exception:
                 turn_idx = int((reg or {}).get("item", {}).get("_bridge_build_turn", 1)) + 1
 
-            if ds_key:
-                _register_prompt(str(base_item.get("prompt") or ""), base_item, next_payload, turn_idx)
             if isinstance(prompts, (list, tuple)):
                 for p in prompts:
                     _register_prompt(str(p), base_item, next_payload, turn_idx)

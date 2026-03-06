@@ -59,7 +59,7 @@ maac:
   critic_devices:
   - cuda:0
   num_agents: 2
-  num_turns: 4
+  num_turns: 5
   critic_type: v
   num_train_epochs: 150
   agent_learning_rate: 2.5e-6
@@ -69,7 +69,7 @@ maac:
   train_batch_size: 1
   max_new_tokens: 512
   discount: 0.9
-  early_termination_threshold: -0.1
+  early_termination_threshold: 1
   eval_interval: 10
   eval_num_samples: 2
   eval_batch_size: 1

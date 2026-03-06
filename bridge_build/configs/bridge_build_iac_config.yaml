@@ -70,7 +70,7 @@ iac:
   train_batch_size: 1
   max_new_tokens: 512
   discount: 0.9
-  early_termination_threshold: -0.1
+  early_termination_threshold: 1
   eval_interval: 10
   eval_num_samples: 2
   eval_batch_size: 1
