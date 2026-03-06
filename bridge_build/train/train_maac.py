@@ -297,6 +297,7 @@ def main() -> int:
     num_agents = int(maac_cfg.get("num_agents") or 1)
     if num_agents not in (1, 2):
         raise ValueError("maac.num_agents must be 1 or 2")
+    configured_num_turns = max(1, int(maac_cfg.get("num_turns") or 1))
 
     dataset_cfg = cfg.get("dataset") or {}
     if not isinstance(dataset_cfg, dict):
@@ -308,15 +309,17 @@ def main() -> int:
         task_cfg = {}
     max_turns_override_raw = task_cfg.get("max_turns")
     max_turns_override = int(max_turns_override_raw) if max_turns_override_raw is not None else None
+    turn_limit = int(max_turns_override) if max_turns_override is not None else int(configured_num_turns)
 
     tasks = load_tasks_from_json(json_path)
     items: List[Dict[str, Any]] = []
     for t in tasks:
         task_item = task_to_item(t)
+        task_item["max_turns"] = int(turn_limit)
         initial_state = make_initial_state(
             t,
             num_agents=num_agents,
-            max_turns=max_turns_override or t.max_turns,
+            max_turns=turn_limit,
         )
         task_item["_bridge_state_before_turn"] = serialize_state(initial_state)
         task_item["prompt"] = f"bridge_build:{t.task_id}"
