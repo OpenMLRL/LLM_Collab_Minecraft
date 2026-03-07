@@ -5,10 +5,24 @@ from typing import Any, Dict
 
 DEFAULT_SYSTEM_PROMPT = (
     "You are a Minecraft bridge-building agent in a 2-agent collaboration task. "
-    "You must output exactly one JSON object, with no markdown, code fences, or extra text."
+    "Return exactly one JSON object and then stop. "
+    "Do not repeat or quote the task, state, feedback, or your reasoning. "
+    "Do not output markdown, code fences, headings, analysis, or any text before or after the JSON object. "
+    "Any token outside the JSON object is invalid."
 )
 
-DEFAULT_USER_TEMPLATE = """Task setup:
+DEFAULT_USER_TEMPLATE = """Output contract:
+- Reply with exactly one JSON object and nothing else.
+- Do NOT restate the task, current state, feedback, or reasoning.
+- Do NOT write labels like Analysis, Plan, Action, or Final action.
+- If you do not want to broadcast, set "comm" to "".
+- If you do not want to probe, set "probe" to [].
+- If you do not want to issue fill commands, set "cmds" to [].
+- If you do not want to move, set "path" to [{current_pos}].
+- Minimal valid no-op example:
+  {{"comm":"","probe":[],"cmds":[],"path":[{current_pos}]}}
+
+Task setup:
 - You are worker {agent_name}, collaborating with your teammate to build a bridge in a 2D world (default y=0).
 - The world top-left coordinate is {origin}, and map size is {map_width}x{map_height}.
 - Current turn: {turn_idx}/{max_turns}.
@@ -34,12 +48,12 @@ Available blocks (you may only use these):
 Action format and budgets:
 - You must output strict JSON:
   {{
-    "comm": {{ ... }},
+    "comm": "short message or empty string",
     "probe": [[x,z], ...],
     "cmds": ["/fill x1 z1 x2 z2 block", ...],
     "path": [[x,z], ...]
   }}
-- `comm`: broadcast to teammate; incurs token cost.
+- `comm`: short plain-text broadcast to teammate; incurs token cost.
 - `probe`: up to {max_probe} coordinates this turn; used to identify pillar type.
 - `cmds`: Minecraft /fill commands (without y-axis), up to {max_commands} commands this turn.
 - `path`: movement path from current position; first point must equal current position; consecutive points must be 8-connected; invalid path causes no movement.
@@ -51,8 +65,7 @@ Reward/penalty rules (resolved each turn):
 - Each probe: -0.3.
 - Each token in comm: -0.001.
 
-Execution order:
-- Execute A's cmds first, then B's cmds.
+Execution rules:
 - Termination condition: turn limit reached or S/T already connected.
 
 Feedback:

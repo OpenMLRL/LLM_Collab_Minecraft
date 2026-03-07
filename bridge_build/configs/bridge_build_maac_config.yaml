@@ -47,9 +47,9 @@ output:
   save_path: output_maac_bridge_build
 
 external:
-  mode: score_feedback
+  mode: empty_feedback
   original_prompt: true
-  previous_response: true
+  previous_response: false
   external_prompt_passthrough: false
 
 maac:

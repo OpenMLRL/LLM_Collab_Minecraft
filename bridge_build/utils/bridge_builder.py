@@ -18,6 +18,7 @@ _FILL_CMD_RE = re.compile(
     r"^/?fill\s+(?P<x1>\S+)\s+(?P<z1>\S+)\s+(?P<x2>\S+)\s+(?P<z2>\S+)\s+(?P<block>\S+)\s*$",
     flags=re.IGNORECASE,
 )
+_ACTION_KEYS = frozenset({"comm", "probe", "cmds", "path"})
 
 
 def normalize_block_id(block_id: str) -> str:
@@ -522,19 +523,72 @@ def _extract_action_obj(text: str) -> Dict[str, Any]:
         if mid not in candidates:
             candidates.append(mid)
 
+    seen_candidates = set(candidates)
+    n = len(raw)
+    for start, ch in enumerate(raw):
+        if ch != "{":
+            continue
+        depth = 0
+        in_string = False
+        string_quote = ""
+        escape = False
+        for end in range(start, n):
+            cur = raw[end]
+            if in_string:
+                if escape:
+                    escape = False
+                    continue
+                if cur == "\\":
+                    escape = True
+                    continue
+                if cur == string_quote:
+                    in_string = False
+                continue
+            if cur in ('"', "'"):
+                in_string = True
+                string_quote = cur
+                continue
+            if cur == "{":
+                depth += 1
+                continue
+            if cur != "}":
+                continue
+            depth -= 1
+            if depth == 0:
+                cand = raw[start : end + 1].strip()
+                if cand and cand not in seen_candidates:
+                    candidates.append(cand)
+                    seen_candidates.add(cand)
+                break
+            if depth < 0:
+                break
+
+    parsed_action_objs: List[Dict[str, Any]] = []
+    parsed_dicts: List[Dict[str, Any]] = []
     for cand in candidates:
         try:
             obj = json.loads(cand)
             if isinstance(obj, dict):
-                return obj
+                if any(key in obj for key in _ACTION_KEYS):
+                    parsed_action_objs.append(obj)
+                else:
+                    parsed_dicts.append(obj)
         except Exception:
             pass
         try:
             obj = ast.literal_eval(cand)
             if isinstance(obj, dict):
-                return obj
+                if any(key in obj for key in _ACTION_KEYS):
+                    parsed_action_objs.append(obj)
+                else:
+                    parsed_dicts.append(obj)
         except Exception:
             pass
+
+    if parsed_action_objs:
+        return parsed_action_objs[-1]
+    if parsed_dicts:
+        return parsed_dicts[-1]
     return {}
 
 

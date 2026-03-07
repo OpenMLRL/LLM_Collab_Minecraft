@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
+from . import empty_feedback
 from . import perfect_feedback
 from . import position_feedback
 from . import score_feedback
@@ -33,7 +34,7 @@ def get_external_transition(
     prompt: str,
     agent_completions: Union[List[str], Tuple[str, ...]],
     num_agents: int = 2,
-    mode: str = "score_feedback",
+    mode: str = "empty_feedback",
     *,
     prompt_history_per_agent: Optional[List[List[str]]] = None,
     response_history_per_agent: Optional[List[List[str]]] = None,
@@ -51,6 +52,25 @@ def get_external_transition(
 
     original_prompt_flag = bool(kwargs.get("original_prompt", True))
     previous_response_flag = bool(kwargs.get("previous_response", False))
+
+    if mode_key in ("empty_feedback", "empty-feedback", "empty"):
+        prompts = empty_feedback.format_followup_prompts(
+            ctx=ctx,
+            agent_completions=list(agent_completions),
+            num_agents=n,
+            original_prompt_flag=original_prompt_flag,
+            previous_response_flag=previous_response_flag,
+            prompt_history_per_agent=prompt_history_per_agent,
+            response_history_per_agent=response_history_per_agent,
+        )
+        if VERBOSE:
+            print("\n" + "=" * 60)
+            print("EXTERNAL MODE PREVIEW: empty_feedback")
+            for i, p in enumerate(prompts):
+                print("-" * 60)
+                print(f"AGENT {i} PROMPT:\n{p}")
+            print("=" * 60 + "\n")
+        return prompts
 
     if mode_key in ("perfect_feedback", "perfect-feedback", "feedback"):
         prompts = perfect_feedback.format_followup_prompts(

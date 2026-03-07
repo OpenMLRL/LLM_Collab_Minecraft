@@ -584,7 +584,7 @@ def main() -> int:
 
         external_set_context_resolver(_resolver)
 
-        external_mode = str(external_cfg.get("mode") or "score_feedback")
+        external_mode = str(external_cfg.get("mode") or "empty_feedback")
         original_prompt_flag = bool(external_cfg.get("original_prompt", True))
         previous_response_flag = bool(external_cfg.get("previous_response", False))
         num_agents_default = int(num_agents)

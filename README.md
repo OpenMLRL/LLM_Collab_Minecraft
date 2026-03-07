@@ -88,6 +88,7 @@ HouseBuild modes:
 
 BridgeBuild modes:
 
+- `empty_feedback` (default)
 - `perfect_feedback`
 - `position_feedback`
 - `score_feedback`
