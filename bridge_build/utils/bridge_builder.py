@@ -357,7 +357,7 @@ def clone_state(state: BridgeState) -> BridgeState:
 
 
 def _traversable_cells(task: TaskSpec, filled: Mapping[Coord2D, str]) -> Set[Coord2D]:
-    cells: Set[Coord2D] = set(task.anchors_s) | set(task.anchors_t)
+    cells: Set[Coord2D] = set(task.land_cells)
     cells.update(task.true_pillars)
     cells.update(task.false_pillars)
     for pos, block in filled.items():
@@ -754,14 +754,14 @@ def _apply_fill(
     *,
     filled: Dict[Coord2D, str],
     fill_cmd: Tuple[int, int, int, int, str],
-    candidate_pillars: Set[Coord2D],
+    immutable_cells: Set[Coord2D],
 ) -> None:
     x1, z1, x2, z2, block = fill_cmd
     block_norm = normalize_block_id(block)
     for x in range(int(x1), int(x2) + 1):
         for z in range(int(z1), int(z2) + 1):
             pos = (int(x), int(z))
-            if pos in candidate_pillars:
+            if pos in immutable_cells:
                 continue
             if _is_air(block_norm):
                 filled.pop(pos, None)
@@ -890,12 +890,12 @@ def apply_turn(
         )
 
     nxt = clone_state(state)
-    candidate_pillars = set(task.candidate_pillars)
+    immutable_cells = set(task.land_cells) | set(task.candidate_pillars)
 
     # Execute fills in agent order: A then B.
     for action in parsed_actions:
         for fill_cmd in action.fills:
-            _apply_fill(filled=nxt.filled, fill_cmd=fill_cmd, candidate_pillars=candidate_pillars)
+            _apply_fill(filled=nxt.filled, fill_cmd=fill_cmd, immutable_cells=immutable_cells)
 
     # Resolve probes and local knowledge.
     true_set = set(task.true_pillars)

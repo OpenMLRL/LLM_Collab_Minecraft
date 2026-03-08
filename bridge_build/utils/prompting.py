@@ -29,6 +29,7 @@ Task setup:
 - Goal: use your /fill blocks plus pillars to make S and T 4-connected while using as few blocks as possible.
 - Pillar candidates include true pillars (Y) and fake pillars (N); pillar type is unknown until probed.
 - Even if /fill covers a pillar coordinate, the pillar itself remains unchanged.
+- Land/anchor cells (`#`, `S`, `T`) are static terrain and cannot be overwritten by /fill.
 
 Global anchor coordinates:
 - S coordinates: {s_coords}
