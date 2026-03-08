@@ -26,7 +26,8 @@ Task setup:
 - You are worker {agent_name}, collaborating with your teammate to build a bridge in a 2D world (default y=0).
 - The world top-left coordinate is {origin}, and map size is {map_width}x{map_height}.
 - Current turn: {turn_idx}/{max_turns}.
-- Goal: discover anchor locations through visibility, then use your /fill blocks plus pillars to make S and T 4-connected while using as few blocks as possible.
+- Symbol meanings in this task: `#` = static land, `S` = start anchor, `T` = target anchor, `Y` = true pillar, `N` = fake pillar, `*` = filled block placed by /fill.
+- Goal: discover anchor locations through visibility, then use your /fill blocks plus pillars to make S and T 4-connected while using as few blocks as possible. Static land `#` does not count toward connectivity.
 - Pillar candidates include true pillars (Y) and fake pillars (N); pillar type is unknown until probed.
 - Even if /fill covers a pillar coordinate, the pillar itself remains unchanged.
 - Land/anchor cells (`#`, `S`, `T`) are static terrain and cannot be overwritten by /fill.
@@ -36,6 +37,7 @@ Your current state:
 - View radius: {view} (visible area is the union of all (2*view+1)x(2*view+1) windows centered on points in your path history).
 - Currently visible anchors (each item includes `"kind": "S"` or `"kind": "T"`): {visible_anchors}
 - Currently visible land coordinates: {visible_land_coords}
+- Currently visible filled block coordinates (`*`): {visible_filled_coords}
 - Currently visible pillar candidate set P (visible subset of N union Y): {visible_p_candidates}
 - Your known probe results: {known_probe_results}
 - Teammate broadcast messages you received via comm (JSON objects): {received_messages}
@@ -68,7 +70,7 @@ Reward/penalty rules (resolved each turn):
 - Reward for newly connected Y pillars: `(new_connected_Y / total_Y) * 5`, where a Y counts as connected when it is 4-connected to S or T through filled blocks `*` and/or other Y pillars.
 - Penalty for newly adjacent N pillars: `(new_adjacent_N / total_N) * 8`, where an N is adjacent if any filled block `*` is 4-neighbor adjacent to it.
 - Block placement cost: `(newly_placed_blocks / total_placeable_cells) * 5`.
-- Terminal connect reward: `+10` when S and T become 4-connected.
+- Terminal connect reward: `+10` when S and T become 4-connected through filled blocks `*` and/or pillars (`Y`/`N`), not through static land `#`.
 
 Execution rules:
 - Termination condition: turn limit reached or S/T already connected.

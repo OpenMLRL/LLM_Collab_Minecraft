@@ -358,7 +358,8 @@ def clone_state(state: BridgeState) -> BridgeState:
 
 
 def _traversable_cells(task: TaskSpec, filled: Mapping[Coord2D, str]) -> Set[Coord2D]:
-    cells: Set[Coord2D] = set(task.land_cells)
+    # S/T connectivity ignores static land `#`; only anchors, pillars, and filled blocks bridge gaps.
+    cells: Set[Coord2D] = set(task.anchors_s) | set(task.anchors_t)
     cells.update(task.true_pillars)
     cells.update(task.false_pillars)
     for pos, block in filled.items():
@@ -821,6 +822,7 @@ def get_agent_observation(task: TaskSpec, state: BridgeState, *, agent_idx: int,
 
     visible_land = _sorted_coords(set(task.land_cells) & visible)
     visible_p = _sorted_coords(set(task.candidate_pillars) & visible)
+    visible_filled = _sorted_coords(_filled_cells(state.filled) & visible)
     visible_anchors = [
         {"coord": [int(x), int(z)], "kind": "S"}
         for x, z in _sorted_coords(set(task.anchors_s) & visible)
@@ -844,6 +846,7 @@ def get_agent_observation(task: TaskSpec, state: BridgeState, *, agent_idx: int,
         "current_pos": [int(state.agent_positions[idx][0]), int(state.agent_positions[idx][1])],
         "visible_anchors": visible_anchors,
         "visible_land_coords": [[int(x), int(z)] for x, z in visible_land],
+        "visible_filled_coords": [[int(x), int(z)] for x, z in visible_filled],
         "visible_p_candidates": [[int(x), int(z)] for x, z in visible_p],
         "known_probe_results": known_items,
         "received_messages": received_messages,
@@ -1063,6 +1066,7 @@ def build_prompt_fields(
         "current_pos": json.dumps(obs["current_pos"], ensure_ascii=False, separators=(",", ":")),
         "visible_anchors": json.dumps(obs["visible_anchors"], ensure_ascii=False, separators=(",", ":")),
         "visible_land_coords": json.dumps(obs["visible_land_coords"], ensure_ascii=False, separators=(",", ":")),
+        "visible_filled_coords": json.dumps(obs["visible_filled_coords"], ensure_ascii=False, separators=(",", ":")),
         "visible_p_candidates": json.dumps(obs["visible_p_candidates"], ensure_ascii=False, separators=(",", ":")),
         "known_probe_results": json.dumps(obs["known_probe_results"], ensure_ascii=False, separators=(",", ":")),
         "received_messages": json.dumps(obs["received_messages"], ensure_ascii=False, separators=(",", ":")),
