@@ -68,6 +68,7 @@ Action format and budgets:
   Example: if current position is `[2,3]`, then `[[2,3],[2,4],[3,5]]` is valid, but `[[2,3],[1,1],[3,1]]` is invalid because it jumps.
 
 Reward/penalty rules (resolved each turn):
+- Gap closeness reward: `5 * (1 - gap_ST / max_gap_ST)`, where `gap_ST` is the minimum number of additional filled blocks needed to make S and T 4-connected under the current map, and `max_gap_ST` is the same quantity on the initial empty map for this task.
 - Reward for newly connected Y pillars: `(new_connected_Y / total_Y) * 5`, where a Y counts as connected when it is 4-connected to S or T through filled blocks `*` and/or other Y pillars.
 - Penalty for newly adjacent N pillars: `(new_adjacent_N / total_N) * 8`, where an N is adjacent if any filled block `*` is 4-neighbor adjacent to it.
 - Block placement cost: `(newly_placed_blocks / total_placeable_cells) * 5`.

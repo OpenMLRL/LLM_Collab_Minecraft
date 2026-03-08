@@ -771,6 +771,49 @@ def _filled_cells(filled: Mapping[Coord2D, str]) -> Set[Coord2D]:
     return {(int(x), int(z)) for (x, z), block in filled.items() if not _is_air(block)}
 
 
+def _gap_st(task: TaskSpec, filled_set: Set[Coord2D]) -> int | None:
+    """Minimum number of additional filled blocks needed to connect S and T.
+
+    Existing traversable cells for S/T connectivity are anchors, pillars, and already
+    filled cells. Static land `#` is not traversable and cannot be converted.
+    """
+    starts = {(int(x), int(z)) for x, z in task.anchors_s}
+    targets = {(int(x), int(z)) for x, z in task.anchors_t}
+    if not starts or not targets:
+        return None
+
+    traversable = starts | targets | set(task.true_pillars) | set(task.false_pillars) | set(filled_set)
+    immutable = set(task.land_cells) | set(task.candidate_pillars)
+
+    dist: Dict[Coord2D, int] = {pos: 0 for pos in starts}
+    q: deque[Coord2D] = deque(starts)
+
+    while q:
+        cur = q.popleft()
+        cur_dist = dist[cur]
+        if cur in targets:
+            return int(cur_dist)
+        for nb in _neighbors4(cur):
+            if not _in_bounds(nb, width=task.width, height=task.height):
+                continue
+            if nb in traversable:
+                next_dist = cur_dist
+            elif nb in immutable:
+                continue
+            else:
+                next_dist = cur_dist + 1
+            prev = dist.get(nb)
+            if prev is not None and prev <= next_dist:
+                continue
+            dist[nb] = next_dist
+            if next_dist == cur_dist:
+                q.appendleft(nb)
+            else:
+                q.append(nb)
+
+    return None
+
+
 def _count_n_adjacent(task: TaskSpec, filled_set: Set[Coord2D]) -> int:
     return sum(1 for pos in task.false_pillars if any(nb in filled_set for nb in _neighbors4(pos)))
 
@@ -888,12 +931,20 @@ def apply_turn(
         frozen_filled_set = _filled_cells(frozen_state.filled)
         frozen_n_adjacent_count = _count_n_adjacent(task, frozen_filled_set)
         frozen_connected_y_count = _count_connected_y(task, frozen_filled_set)
+        frozen_gap_st = _gap_st(task, frozen_filled_set)
+        frozen_max_gap_st = _gap_st(task, set())
+        if frozen_max_gap_st is None or frozen_max_gap_st <= 0:
+            frozen_max_gap_st = 1
+        frozen_gap_for_reward = int(frozen_max_gap_st if frozen_gap_st is None else frozen_gap_st)
         metrics = {
             "reward": 0.0,
+            "bonus_gap_st": 5.0 * (1.0 - (float(frozen_gap_for_reward) / float(frozen_max_gap_st))),
             "bonus_y_connected": 0.0,
             "penalty_n_adjacent": 0.0,
             "penalty_block_cost": 0.0,
             "bonus_terminal_connect": 0.0,
+            "gap_st": None if frozen_gap_st is None else int(frozen_gap_st),
+            "max_gap_st": int(frozen_max_gap_st),
             "connected_y_count": int(frozen_connected_y_count),
             "n_adjacent_count": int(frozen_n_adjacent_count),
             "y_uncovered_count": int(max(0, len(task.true_pillars) - frozen_connected_y_count)),
@@ -984,6 +1035,11 @@ def apply_turn(
     prev_connected_y_count = _count_connected_y(task, prev_filled_set)
     connected_y_count = _count_connected_y(task, filled_set)
     y_uncovered_count = max(0, len(task.true_pillars) - connected_y_count)
+    gap_st = _gap_st(task, filled_set)
+    max_gap_st = _gap_st(task, set())
+    if max_gap_st is None or max_gap_st <= 0:
+        max_gap_st = 1
+    gap_st_for_reward = int(max_gap_st if gap_st is None else gap_st)
 
     connected = is_connected_st(task, nxt.filled)
 
@@ -997,11 +1053,12 @@ def apply_turn(
     new_adjacent_n_count = max(0, n_adjacent_count - prev_n_adjacent_count)
     newly_placed_block_count = len(filled_set - prev_filled_set)
 
+    bonus_gap_st = 5.0 * (1.0 - (float(gap_st_for_reward) / float(max_gap_st)))
     bonus_y_connected = (float(new_connected_y_count) / float(total_y)) * 5.0
     penalty_n = (float(new_adjacent_n_count) / float(total_n)) * 8.0
     penalty_block = (float(newly_placed_block_count) / float(total_placeable)) * 5.0
     bonus_terminal_connect = 10.0 if (connected and not state.connected) else 0.0
-    reward = bonus_y_connected - penalty_n - penalty_block + bonus_terminal_connect
+    reward = bonus_gap_st + bonus_y_connected - penalty_n - penalty_block + bonus_terminal_connect
 
     nxt.turn_index = int(state.turn_index) + 1
     nxt.connected = bool(connected)
@@ -1009,10 +1066,13 @@ def apply_turn(
 
     metrics = {
         "reward": reward,
+        "bonus_gap_st": bonus_gap_st,
         "bonus_y_connected": bonus_y_connected,
         "penalty_n_adjacent": penalty_n,
         "penalty_block_cost": penalty_block,
         "bonus_terminal_connect": bonus_terminal_connect,
+        "gap_st": None if gap_st is None else int(gap_st),
+        "max_gap_st": int(max_gap_st),
         "connected_y_count": int(connected_y_count),
         "n_adjacent_count": int(n_adjacent_count),
         "y_uncovered_count": int(y_uncovered_count),

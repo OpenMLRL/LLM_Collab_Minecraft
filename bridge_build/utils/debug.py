@@ -57,6 +57,8 @@ def print_turn_debug(
     agent_outputs: Sequence[str],
 ) -> None:
     connected = bool(metrics.get("connected", False))
+    gap_st = metrics.get("gap_st")
+    max_gap_st = int(metrics.get("max_gap_st", 0))
     n_adj = int(metrics.get("n_adjacent_count", 0))
     y_uncovered = int(metrics.get("y_uncovered_count", 0))
     probe_cnt = int(metrics.get("num_valid_probes", 0))
@@ -65,7 +67,7 @@ def print_turn_debug(
     print(
         "[bridge_build debug] "
         f"task={task.task_id} turn={int(turn_idx)} reward={float(reward):.4f} "
-        f"connected={connected} N_adj={n_adj} Y_uncovered={y_uncovered} "
+        f"connected={connected} gap_ST={gap_st}/{max_gap_st} N_adj={n_adj} Y_uncovered={y_uncovered} "
         f"probe={probe_cnt} comm_tokens={comm_tokens}",
         flush=True,
     )

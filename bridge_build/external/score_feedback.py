@@ -50,6 +50,8 @@ def format_followup_prompts(
             "Score feedback:",
             f"- Turn: {turn_no}",
             f"- reward: {reward:.4f}",
+            f"- bonus_gap_st: {float(metrics.get('bonus_gap_st', 0.0)):.4f}",
+            f"- gap_ST: {metrics.get('gap_st', None)} / {int(metrics.get('max_gap_st', 0))}",
             f"- bonus_y_connected: {float(metrics.get('bonus_y_connected', 0.0)):.4f}",
             f"- penalty_n_adjacent: {float(metrics.get('penalty_n_adjacent', 0.0)):.4f}",
             f"- penalty_block_cost: {float(metrics.get('penalty_block_cost', 0.0)):.4f}",
