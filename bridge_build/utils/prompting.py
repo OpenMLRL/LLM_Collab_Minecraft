@@ -65,6 +65,7 @@ Action format and budgets:
 - `probe`: up to {max_probe} coordinates this turn; used to identify pillar type.
 - `cmds`: Minecraft /fill commands (without y-axis), up to {max_commands} commands this turn.
 - `path`: movement path from current position; first point must equal current position; consecutive points must be 8-connected; invalid path causes no movement.
+  Example: if current position is `[2,3]`, then `[[2,3],[2,4],[3,5]]` is valid, but `[[2,3],[1,1],[3,1]]` is invalid because it jumps.
 
 Reward/penalty rules (resolved each turn):
 - Reward for newly connected Y pillars: `(new_connected_Y / total_Y) * 5`, where a Y counts as connected when it is 4-connected to S or T through filled blocks `*` and/or other Y pillars.

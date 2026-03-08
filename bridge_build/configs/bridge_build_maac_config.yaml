@@ -59,7 +59,7 @@ maac:
   critic_devices:
   - cuda:0
   num_agents: 2
-  num_turns: 5
+  num_turns: 4
   critic_type: v
   num_train_epochs: 150
   agent_learning_rate: 2.5e-6
