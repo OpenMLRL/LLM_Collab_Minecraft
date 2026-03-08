@@ -50,11 +50,13 @@ def format_followup_prompts(
             "Score feedback:",
             f"- Turn: {turn_no}",
             f"- reward: {reward:.4f}",
+            f"- bonus_y_connected: {float(metrics.get('bonus_y_connected', 0.0)):.4f}",
             f"- penalty_n_adjacent: {float(metrics.get('penalty_n_adjacent', 0.0)):.4f}",
-            f"- penalty_y_uncovered: {float(metrics.get('penalty_y_uncovered', 0.0)):.4f}",
-            f"- penalty_disconnected: {float(metrics.get('penalty_disconnected', 0.0)):.4f}",
-            f"- penalty_probe: {float(metrics.get('penalty_probe', 0.0)):.4f}",
-            f"- penalty_comm: {float(metrics.get('penalty_comm', 0.0)):.4f}",
+            f"- penalty_block_cost: {float(metrics.get('penalty_block_cost', 0.0)):.4f}",
+            f"- bonus_terminal_connect: {float(metrics.get('bonus_terminal_connect', 0.0)):.4f}",
+            f"- new_connected_y_count: {int(metrics.get('new_connected_y_count', 0))}",
+            f"- new_adjacent_n_count: {int(metrics.get('new_adjacent_n_count', 0))}",
+            f"- newly_placed_block_count: {int(metrics.get('newly_placed_block_count', 0))}",
             f"- connected(S,T): {bool(metrics.get('connected', False))}",
         ]
     )

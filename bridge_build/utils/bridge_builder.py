@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import copy
 import json
 import re
 from collections import deque
@@ -135,7 +136,7 @@ class BridgeState:
     agent_positions: List[Coord2D]
     vision_origins: List[Set[Coord2D]]
     known_pillars: List[Dict[Coord2D, str]]
-    inbox: List[List[str]]
+    inbox: List[List[Any]]
     connected: bool
     terminated: bool
 
@@ -433,7 +434,7 @@ def serialize_state(state: BridgeState) -> Dict[str, Any]:
         "known_pillars": [
             {_coord_key(p): str(v) for p, v in known.items()} for known in state.known_pillars
         ],
-        "inbox": [list(msgs) for msgs in state.inbox],
+        "inbox": [copy.deepcopy(list(msgs)) for msgs in state.inbox],
         "connected": bool(state.connected),
         "terminated": bool(state.terminated),
     }
@@ -486,12 +487,12 @@ def deserialize_state(value: Mapping[str, Any], *, num_agents: int) -> BridgeSta
     while len(known_pillars) < n:
         known_pillars.append({})
 
-    inbox: List[List[str]] = []
+    inbox: List[List[Any]] = []
     raw_inbox = value.get("inbox") or []
     if isinstance(raw_inbox, list):
         for raw_agent in raw_inbox[:n]:
             if isinstance(raw_agent, list):
-                inbox.append([str(x) for x in raw_agent])
+                inbox.append(copy.deepcopy(list(raw_agent)))
             else:
                 inbox.append([])
     while len(inbox) < n:
@@ -596,13 +597,9 @@ def _parse_comm(comm_raw: Any) -> Tuple[Any, str, int]:
     if comm_raw is None:
         return {}, "", 0
     if comm_raw == {} or comm_raw == [] or comm_raw == "":
-        return comm_raw, "", 0
-
-    if isinstance(comm_raw, str):
-        txt = comm_raw.strip()
-        if not txt:
-            return comm_raw, "", 0
-        return comm_raw, txt, _count_tokens(txt)
+        return {}, "", 0
+    if not isinstance(comm_raw, dict):
+        return {}, "", 0
 
     try:
         txt = json.dumps(comm_raw, ensure_ascii=False, separators=(",", ":"))
@@ -769,6 +766,33 @@ def _apply_fill(
                 filled[pos] = block_norm
 
 
+def _filled_cells(filled: Mapping[Coord2D, str]) -> Set[Coord2D]:
+    return {(int(x), int(z)) for (x, z), block in filled.items() if not _is_air(block)}
+
+
+def _count_n_adjacent(task: TaskSpec, filled_set: Set[Coord2D]) -> int:
+    return sum(1 for pos in task.false_pillars if any(nb in filled_set for nb in _neighbors4(pos)))
+
+
+def _count_connected_y(task: TaskSpec, filled_set: Set[Coord2D]) -> int:
+    if not task.true_pillars:
+        return 0
+
+    traversable: Set[Coord2D] = set(task.anchors_s) | set(task.anchors_t) | set(task.true_pillars) | set(filled_set)
+    q: deque[Coord2D] = deque((int(x), int(z)) for x, z in [*task.anchors_s, *task.anchors_t])
+    seen: Set[Coord2D] = set(q)
+
+    while q:
+        cur = q.popleft()
+        for nb in _neighbors4(cur):
+            if nb in seen or nb not in traversable:
+                continue
+            seen.add(nb)
+            q.append(nb)
+
+    return sum(1 for pos in task.true_pillars if pos in seen)
+
+
 def compute_visible_cells(
     origins: Iterable[Coord2D], *, view: int, width: int, height: int
 ) -> Set[Coord2D]:
@@ -797,6 +821,14 @@ def get_agent_observation(task: TaskSpec, state: BridgeState, *, agent_idx: int,
 
     visible_land = _sorted_coords(set(task.land_cells) & visible)
     visible_p = _sorted_coords(set(task.candidate_pillars) & visible)
+    visible_anchors = [
+        {"coord": [int(x), int(z)], "kind": "S"}
+        for x, z in _sorted_coords(set(task.anchors_s) & visible)
+    ]
+    visible_anchors.extend(
+        {"coord": [int(x), int(z)], "kind": "T"}
+        for x, z in _sorted_coords(set(task.anchors_t) & visible)
+    )
 
     known = state.known_pillars[idx]
     known_items = [
@@ -804,12 +836,13 @@ def get_agent_observation(task: TaskSpec, state: BridgeState, *, agent_idx: int,
         for x, z in _sorted_coords(known.keys())
     ]
 
-    received_messages = list(state.inbox[idx])
+    received_messages = copy.deepcopy(list(state.inbox[idx]))
 
     return {
         "turn_index": int(state.turn_index),
         "max_turns": int(state.max_turns),
         "current_pos": [int(state.agent_positions[idx][0]), int(state.agent_positions[idx][1])],
+        "visible_anchors": visible_anchors,
         "visible_land_coords": [[int(x), int(z)] for x, z in visible_land],
         "visible_p_candidates": [[int(x), int(z)] for x, z in visible_p],
         "known_probe_results": known_items,
@@ -849,13 +882,26 @@ def apply_turn(
 
     if state.terminated:
         frozen_state = clone_state(state)
+        frozen_filled_set = _filled_cells(frozen_state.filled)
+        frozen_n_adjacent_count = _count_n_adjacent(task, frozen_filled_set)
+        frozen_connected_y_count = _count_connected_y(task, frozen_filled_set)
         metrics = {
             "reward": 0.0,
+            "bonus_y_connected": 0.0,
             "penalty_n_adjacent": 0.0,
-            "penalty_y_uncovered": 0.0,
-            "penalty_disconnected": 0.0,
-            "penalty_probe": 0.0,
-            "penalty_comm": 0.0,
+            "penalty_block_cost": 0.0,
+            "bonus_terminal_connect": 0.0,
+            "connected_y_count": int(frozen_connected_y_count),
+            "n_adjacent_count": int(frozen_n_adjacent_count),
+            "y_uncovered_count": int(max(0, len(task.true_pillars) - frozen_connected_y_count)),
+            "new_connected_y_count": 0,
+            "new_adjacent_n_count": 0,
+            "newly_placed_block_count": 0,
+            "total_true_pillars": int(len(task.true_pillars)),
+            "total_false_pillars": int(len(task.false_pillars)),
+            "total_placeable_cells": int(
+                max(1, (task.width * task.height) - len(task.land_cells) - len(task.candidate_pillars))
+            ),
             "num_valid_probes": 0,
             "comm_tokens": 0,
             "connected": bool(state.connected),
@@ -917,7 +963,7 @@ def apply_turn(
         for dst in range(n):
             if dst == src:
                 continue
-            nxt.inbox[dst].append(action.comm_text)
+            nxt.inbox[dst].append(copy.deepcopy(action.comm_obj))
 
     # Apply path movement and update fog-of-war origins.
     for i, action in enumerate(parsed_actions):
@@ -928,31 +974,31 @@ def apply_turn(
                 nxt.vision_origins[i].add(p)
             nxt.agent_positions[i] = action.path[-1]
 
-    filled_set = {p for p, b in nxt.filled.items() if not _is_air(b)}
-
-    n_adjacent_count = 0
-    for pos in task.false_pillars:
-        if any(nb in filled_set for nb in _neighbors4(pos)):
-            n_adjacent_count += 1
-
-    y_uncovered_count = 0
-    for pos in task.true_pillars:
-        if not any(nb in filled_set for nb in _neighbors4(pos)):
-            y_uncovered_count += 1
+    prev_filled_set = _filled_cells(state.filled)
+    filled_set = _filled_cells(nxt.filled)
+    prev_n_adjacent_count = _count_n_adjacent(task, prev_filled_set)
+    n_adjacent_count = _count_n_adjacent(task, filled_set)
+    prev_connected_y_count = _count_connected_y(task, prev_filled_set)
+    connected_y_count = _count_connected_y(task, filled_set)
+    y_uncovered_count = max(0, len(task.true_pillars) - connected_y_count)
 
     connected = is_connected_st(task, nxt.filled)
 
     probe_count = sum(len(action.probes) for action in parsed_actions)
     comm_tokens = sum(int(action.comm_tokens) for action in parsed_actions)
+    total_y = max(1, len(task.true_pillars))
+    total_n = max(1, len(task.false_pillars))
+    total_placeable = max(1, (task.width * task.height) - len(task.land_cells) - len(task.candidate_pillars))
 
-    penalty_n = float(n_adjacent_count) * 1.0
-    penalty_y = float(y_uncovered_count) * 2.0
-    penalty_disc = 0.0 if connected else 5.0
-    penalty_probe = float(probe_count) * 0.3
-    penalty_comm = float(comm_tokens) * 0.001
+    new_connected_y_count = max(0, connected_y_count - prev_connected_y_count)
+    new_adjacent_n_count = max(0, n_adjacent_count - prev_n_adjacent_count)
+    newly_placed_block_count = len(filled_set - prev_filled_set)
 
-    total_penalty = penalty_n + penalty_y + penalty_disc + penalty_probe + penalty_comm
-    reward = -float(total_penalty)
+    bonus_y_connected = (float(new_connected_y_count) / float(total_y)) * 5.0
+    penalty_n = (float(new_adjacent_n_count) / float(total_n)) * 8.0
+    penalty_block = (float(newly_placed_block_count) / float(total_placeable)) * 5.0
+    bonus_terminal_connect = 10.0 if (connected and not state.connected) else 0.0
+    reward = bonus_y_connected - penalty_n - penalty_block + bonus_terminal_connect
 
     nxt.turn_index = int(state.turn_index) + 1
     nxt.connected = bool(connected)
@@ -960,13 +1006,19 @@ def apply_turn(
 
     metrics = {
         "reward": reward,
+        "bonus_y_connected": bonus_y_connected,
         "penalty_n_adjacent": penalty_n,
-        "penalty_y_uncovered": penalty_y,
-        "penalty_disconnected": penalty_disc,
-        "penalty_probe": penalty_probe,
-        "penalty_comm": penalty_comm,
+        "penalty_block_cost": penalty_block,
+        "bonus_terminal_connect": bonus_terminal_connect,
+        "connected_y_count": int(connected_y_count),
         "n_adjacent_count": int(n_adjacent_count),
         "y_uncovered_count": int(y_uncovered_count),
+        "new_connected_y_count": int(new_connected_y_count),
+        "new_adjacent_n_count": int(new_adjacent_n_count),
+        "newly_placed_block_count": int(newly_placed_block_count),
+        "total_true_pillars": int(len(task.true_pillars)),
+        "total_false_pillars": int(len(task.false_pillars)),
+        "total_placeable_cells": int(total_placeable),
         "num_valid_probes": int(probe_count),
         "comm_tokens": int(comm_tokens),
         "connected": bool(connected),
@@ -1008,9 +1060,8 @@ def build_prompt_fields(
         "map_size": f"{task.width}x{task.height}",
         "origin": "(0,0)",
         "view": int(view),
-        "s_coords": _coords_to_json(task.anchors_s),
-        "t_coords": _coords_to_json(task.anchors_t),
         "current_pos": json.dumps(obs["current_pos"], ensure_ascii=False, separators=(",", ":")),
+        "visible_anchors": json.dumps(obs["visible_anchors"], ensure_ascii=False, separators=(",", ":")),
         "visible_land_coords": json.dumps(obs["visible_land_coords"], ensure_ascii=False, separators=(",", ":")),
         "visible_p_candidates": json.dumps(obs["visible_p_candidates"], ensure_ascii=False, separators=(",", ":")),
         "known_probe_results": json.dumps(obs["known_probe_results"], ensure_ascii=False, separators=(",", ":")),

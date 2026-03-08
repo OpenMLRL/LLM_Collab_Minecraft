@@ -119,11 +119,13 @@ def get_reward_function(*, cfg: Dict[str, Any], num_agents: int) -> Callable[...
         _log_train_metrics(
             {
                 "connected": 1.0 if bool(metrics.get("connected", False)) else 0.0,
-                "level_1": -float(metrics.get("penalty_n_adjacent", 0.0)),
-                "level_2": -float(metrics.get("penalty_y_uncovered", 0.0)),
-                "level_3": -float(metrics.get("penalty_disconnected", 0.0)),
-                "level_4": -float(metrics.get("penalty_probe", 0.0)),
-                "level_5": -float(metrics.get("penalty_comm", 0.0)),
+                "bonus_y_connected": float(metrics.get("bonus_y_connected", 0.0)),
+                "penalty_n_adjacent": -float(metrics.get("penalty_n_adjacent", 0.0)),
+                "penalty_block_cost": -float(metrics.get("penalty_block_cost", 0.0)),
+                "bonus_terminal_connect": float(metrics.get("bonus_terminal_connect", 0.0)),
+                "new_connected_y_count": float(metrics.get("new_connected_y_count", 0.0)),
+                "new_adjacent_n_count": float(metrics.get("new_adjacent_n_count", 0.0)),
+                "newly_placed_block_count": float(metrics.get("newly_placed_block_count", 0.0)),
                 "level_total": reward,
             },
             turn_idx=turn_idx,

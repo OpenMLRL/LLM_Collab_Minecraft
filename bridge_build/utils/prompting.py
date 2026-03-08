@@ -15,33 +15,30 @@ DEFAULT_USER_TEMPLATE = """Output contract:
 - Reply with exactly one JSON object and nothing else.
 - Do NOT restate the task, current state, feedback, or reasoning.
 - Do NOT write labels like Analysis, Plan, Action, or Final action.
-- If you do not want to broadcast, set "comm" to "".
+- If you do not want to broadcast, set "comm" to {{}}.
 - If you do not want to probe, set "probe" to [].
 - If you do not want to issue fill commands, set "cmds" to [].
 - If you do not want to move, set "path" to [{current_pos}].
 - Minimal valid no-op example:
-  {{"comm":"","probe":[],"cmds":[],"path":[{current_pos}]}}
+  {{"comm":{{}},"probe":[],"cmds":[],"path":[{current_pos}]}}
 
 Task setup:
 - You are worker {agent_name}, collaborating with your teammate to build a bridge in a 2D world (default y=0).
 - The world top-left coordinate is {origin}, and map size is {map_width}x{map_height}.
 - Current turn: {turn_idx}/{max_turns}.
-- Goal: use your /fill blocks plus pillars to make S and T 4-connected while using as few blocks as possible.
+- Goal: discover anchor locations through visibility, then use your /fill blocks plus pillars to make S and T 4-connected while using as few blocks as possible.
 - Pillar candidates include true pillars (Y) and fake pillars (N); pillar type is unknown until probed.
 - Even if /fill covers a pillar coordinate, the pillar itself remains unchanged.
 - Land/anchor cells (`#`, `S`, `T`) are static terrain and cannot be overwritten by /fill.
 
-Global anchor coordinates:
-- S coordinates: {s_coords}
-- T coordinates: {t_coords}
-
 Your current state:
 - Current position: {current_pos}
 - View radius: {view} (visible area is the union of all (2*view+1)x(2*view+1) windows centered on points in your path history).
+- Currently visible anchors (each item includes `"kind": "S"` or `"kind": "T"`): {visible_anchors}
 - Currently visible land coordinates: {visible_land_coords}
 - Currently visible pillar candidate set P (visible subset of N union Y): {visible_p_candidates}
 - Your known probe results: {known_probe_results}
-- Teammate broadcast messages you received via comm: {received_messages}
+- Teammate broadcast messages you received via comm (JSON objects): {received_messages}
 
 Available blocks (you may only use these):
 {available_blocks}
@@ -49,22 +46,29 @@ Available blocks (you may only use these):
 Action format and budgets:
 - You must output strict JSON:
   {{
-    "comm": "short message or empty string",
+    "comm": {{
+      "contour_summary": {{
+        "true_pillar_pattern": "short regional summary or empty string",
+        "fake_pillar_pattern": "short regional summary or empty string"
+      }},
+      "discovered_pillars": [
+        {{"x": 2, "z": 2, "type": "Y", "source": "self_probe"}}
+      ]
+    }},
     "probe": [[x,z], ...],
     "cmds": ["/fill x1 z1 x2 z2 block", ...],
     "path": [[x,z], ...]
   }}
-- `comm`: short plain-text broadcast to teammate; incurs token cost.
+- `comm`: JSON object broadcast to teammate. Use `{{}}` for no message. Prefer structured facts over free-form text.
 - `probe`: up to {max_probe} coordinates this turn; used to identify pillar type.
 - `cmds`: Minecraft /fill commands (without y-axis), up to {max_commands} commands this turn.
 - `path`: movement path from current position; first point must equal current position; consecutive points must be 8-connected; invalid path causes no movement.
 
 Reward/penalty rules (resolved each turn):
-- Any N that is 4-neighbor adjacent to filled blocks: -1 (counted once per N).
-- Any Y that is NOT 4-neighbor adjacent to filled blocks: -2 (counted once per Y).
-- If S and T are not 4-connected: -5.
-- Each probe: -0.3.
-- Each token in comm: -0.001.
+- Reward for newly connected Y pillars: `(new_connected_Y / total_Y) * 5`, where a Y counts as connected when it is 4-connected to S or T through filled blocks `*` and/or other Y pillars.
+- Penalty for newly adjacent N pillars: `(new_adjacent_N / total_N) * 8`, where an N is adjacent if any filled block `*` is 4-neighbor adjacent to it.
+- Block placement cost: `(newly_placed_blocks / total_placeable_cells) * 5`.
+- Terminal connect reward: `+10` when S and T become 4-connected.
 
 Execution rules:
 - Termination condition: turn limit reached or S/T already connected.

@@ -23,6 +23,7 @@ def _build_feedback(metrics: Dict[str, Any], *, turn_number: int, agent_idx: int
     reward = float(metrics.get("reward", 0.0))
     n_adj = int(metrics.get("n_adjacent_count", 0))
     y_uncovered = int(metrics.get("y_uncovered_count", 0))
+    y_connected = int(metrics.get("connected_y_count", 0))
     probe_cnt = int(metrics.get("num_valid_probes", 0))
     comm_tokens = int(metrics.get("comm_tokens", 0))
     return "\n".join(
@@ -32,11 +33,16 @@ def _build_feedback(metrics: Dict[str, Any], *, turn_number: int, agent_idx: int
             f"- Agent: {'A' if agent_idx == 0 else 'B'}",
             f"- reward: {reward:.4f}",
             f"- connected(S,T): {connected}",
+            f"- Y connected count: {y_connected}",
             f"- N adjacent count: {n_adj}",
             f"- Y uncovered count: {y_uncovered}",
+            f"- bonus_y_connected: {float(metrics.get('bonus_y_connected', 0.0)):.4f}",
+            f"- penalty_n_adjacent: {float(metrics.get('penalty_n_adjacent', 0.0)):.4f}",
+            f"- penalty_block_cost: {float(metrics.get('penalty_block_cost', 0.0)):.4f}",
+            f"- bonus_terminal_connect: {float(metrics.get('bonus_terminal_connect', 0.0)):.4f}",
             f"- valid probes: {probe_cnt}",
             f"- comm tokens: {comm_tokens}",
-            "- Target: continue reducing penalties and connect S/T as soon as possible.",
+            "- Target: gather information, avoid new N adjacency, connect more Y, then connect S/T.",
         ]
     )
 
