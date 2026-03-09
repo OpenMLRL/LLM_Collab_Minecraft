@@ -410,22 +410,63 @@ def main() -> int:
             user_template_agent2=str(prompt_ctx["user_template_agent2"]),
         )
 
+    def _dataset_key_from_item(item: Mapping[str, Any]) -> str:
+        return _normalize_key(str(item.get("prompt") or ""))
+
+    def _make_registry_entry(
+        *,
+        base_item: Mapping[str, Any],
+        payload: Mapping[str, Any],
+        turn_idx: int,
+    ) -> Dict[str, Any]:
+        ds_key = _dataset_key_from_item(base_item)
+        if not ds_key:
+            raise KeyError("bridge_build item is missing a stable dataset key")
+        mapped_item = dict(base_item)
+        mapped_item["_bridge_state_before_turn"] = copy.deepcopy(payload.get("state_before_turn") or {})
+        mapped_item["_bridge_build_turn"] = int(turn_idx)
+        return {
+            "item": mapped_item,
+            "payload": copy.deepcopy(dict(payload)),
+            "base_item": dict(base_item),
+            "dataset_key": ds_key,
+        }
+
     def _register_prompt(prompt: str, base_item: Mapping[str, Any], payload: Mapping[str, Any], turn_idx: int) -> None:
         key = _normalize_key(prompt)
         if not key:
             return
-        mapped_item = dict(base_item)
-        mapped_item["_bridge_state_before_turn"] = copy.deepcopy(payload.get("state_before_turn") or {})
-        mapped_item["_bridge_build_turn"] = int(turn_idx)
-        prompt_registry[key] = {
-            "item": mapped_item,
-            "payload": copy.deepcopy(dict(payload)),
-            "base_item": dict(base_item),
-        }
+        prompt_registry[key] = _make_registry_entry(
+            base_item=base_item,
+            payload=payload,
+            turn_idx=turn_idx,
+        )
+
+    def _resolve_prompt_entry(prompt: str) -> Dict[str, Any] | None:
+        key = _normalize_key(prompt)
+        if not key:
+            return None
+        reg = prompt_registry.get(key)
+        if reg is not None:
+            return reg
+        base_item = dataset_prompt_map.get(key)
+        if base_item is None:
+            return None
+        payload = dataset_payload_map.get(key)
+        if payload is None:
+            payload = _payload_from_item(base_item)
+        return _make_registry_entry(base_item=base_item, payload=payload, turn_idx=1)
+
+    def _require_prompt_entry(prompt: str) -> Dict[str, Any]:
+        reg = _resolve_prompt_entry(prompt)
+        if reg is not None:
+            return reg
+        excerpt = (str(prompt or "").strip().replace("\n", " "))[:160]
+        raise KeyError(f"Failed to resolve bridge_build prompt to rollout state: {excerpt}")
 
     def _register_dataset_prompts(items_list: List[Dict[str, Any]], turn_idx: int) -> None:
         for item in items_list:
-            ds_key = _normalize_key(str(item.get("prompt") or ""))
+            ds_key = _dataset_key_from_item(item)
             if ds_key and ds_key not in dataset_prompt_map:
                 dataset_prompt_map[ds_key] = dict(item)
 
@@ -447,15 +488,15 @@ def main() -> int:
     if eval_items:
         _register_dataset_prompts(eval_items, 1)
 
-    default_batch_item = dict(train_items[0]) if train_items else {}
-
     def _lookup_item(prompts: List[str]) -> Dict[str, Any]:
         for p in prompts or []:
-            key = _normalize_key(p)
-            reg = prompt_registry.get(key)
+            reg = _resolve_prompt_entry(str(p))
             if reg is not None:
                 return dict(reg.get("item") or {})
-        return dict(default_batch_item)
+        excerpt = ""
+        if prompts:
+            excerpt = (str(prompts[0]).strip().replace("\n", " "))[:160]
+        raise KeyError(f"Failed to resolve bridge_build reward batch item from prompts: {excerpt}")
 
     reward_base = get_reward_function(cfg=cfg, num_agents=num_agents)
     if num_agents == 1:
@@ -572,13 +613,14 @@ def main() -> int:
 
     if is_multi_turn:
         def _resolver(prompt: str) -> Any:
-            key = _normalize_key(prompt)
-            payload = dataset_payload_map.get(key)
-            if payload is not None:
-                return payload
-            reg = prompt_registry.get(key)
+            reg = _resolve_prompt_entry(prompt)
             if reg is None:
                 return None
+            ds_key = _normalize_key(str(reg.get("dataset_key") or ""))
+            if ds_key:
+                payload = dataset_payload_map.get(ds_key)
+                if payload is not None:
+                    return payload
             return reg.get("payload")
 
         external_set_context_resolver(_resolver)
@@ -592,8 +634,11 @@ def main() -> int:
             n_agents = int(num_agents) if num_agents is not None else num_agents_default
             prompt_history = _kwargs.get("prompt_history_per_agent")
             response_history = _kwargs.get("response_history_per_agent")
-            ds_key = _normalize_key(str(prompt or ""))
-            base_item_for_reset = dataset_prompt_map.get(ds_key)
+            reg = _require_prompt_entry(prompt)
+            ds_key = _normalize_key(str(reg.get("dataset_key") or ""))
+            base_item_for_reset = dict(reg.get("base_item") or {})
+            if not ds_key or not base_item_for_reset:
+                raise KeyError("Resolved bridge_build prompt is missing dataset key or base item")
 
             # Reset per-rollout state at the first external transition call of each rollout.
             is_first_external_turn = False
@@ -601,7 +646,7 @@ def main() -> int:
                 is_first_external_turn = bool(prompt_history) and len(prompt_history[0]) <= 1
             except Exception:
                 is_first_external_turn = False
-            if is_first_external_turn and base_item_for_reset is not None:
+            if is_first_external_turn:
                 dataset_payload_map[ds_key] = _payload_from_item(base_item_for_reset)
 
             prompts = external_get_transition(
@@ -615,21 +660,14 @@ def main() -> int:
                 response_history_per_agent=response_history,
             )
 
-            key = ds_key
-            reg = prompt_registry.get(key)
-            base_item = dataset_prompt_map.get(key)
-            if base_item is None and reg is not None:
-                base_item = dict(reg.get("base_item") or {})
-            if base_item is None:
-                return prompts
+            base_item = dict(reg.get("base_item") or {})
 
             # The per-dataset payload map is the authoritative rollout state.
-            payload = dataset_payload_map.get(key)
+            payload = dataset_payload_map.get(ds_key)
             if payload is None:
-                if reg is not None:
-                    payload = dict(reg.get("payload") or {})
-                else:
-                    payload = _payload_from_item(base_item)
+                payload = dict(reg.get("payload") or {})
+            if not payload:
+                payload = _payload_from_item(base_item)
 
             try:
                 next_payload, _metrics, _actions = transition_payload(
@@ -640,14 +678,12 @@ def main() -> int:
             except Exception:
                 next_payload = payload
 
-            ds_key = _normalize_key(str(base_item.get("prompt") or ""))
-            if ds_key:
-                dataset_payload_map[ds_key] = copy.deepcopy(next_payload)
+            dataset_payload_map[ds_key] = copy.deepcopy(next_payload)
 
             try:
                 turn_idx = int(len(prompt_history[0]) + 1) if prompt_history else 2
             except Exception:
-                turn_idx = int((reg or {}).get("item", {}).get("_bridge_build_turn", 1)) + 1
+                turn_idx = int((reg.get("item") or {}).get("_bridge_build_turn", 1)) + 1
 
             if isinstance(prompts, (list, tuple)):
                 for p in prompts:

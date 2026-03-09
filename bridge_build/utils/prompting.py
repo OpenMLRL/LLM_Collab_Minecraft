@@ -26,8 +26,8 @@ Task setup:
 - You are worker {agent_name}, collaborating with your teammate to build a bridge in a 2D world (default y=0).
 - The world top-left coordinate is {origin}, and map size is {map_width}x{map_height}.
 - Current turn: {turn_idx}/{max_turns}.
-- Symbol meanings in this task: `#` = static land, `S` = start anchor, `T` = target anchor, `Y` = true pillar, `N` = fake pillar, `*` = filled block placed by /fill.
-- Goal: discover anchor locations through visibility, then use your /fill blocks plus pillars to make S and T 4-connected while using as few blocks as possible. Static land `#` does not count toward connectivity.
+- Symbol meanings in this task: `#` = static land, `S` = anchor U, `T` = anchor V, `Y` = true pillar, `N` = fake pillar, `*` = filled block placed by /fill.
+- Goal: discover anchor locations through visibility, then use your /fill blocks plus pillars to make anchor U and anchor V 4-connected while using as few blocks as possible. Static land `#` does not count toward connectivity.
 - Pillar candidates include true pillars (Y) and fake pillars (N); pillar type is unknown until probed.
 - Even if /fill covers a pillar coordinate, the pillar itself remains unchanged.
 - Land/anchor cells (`#`, `S`, `T`) are static terrain and cannot be overwritten by /fill.
@@ -68,14 +68,14 @@ Action format and budgets:
   Example: if current position is `[2,3]`, then `[[2,3],[2,4],[3,5]]` is valid, but `[[2,3],[1,1],[3,1]]` is invalid because it jumps.
 
 Reward/penalty rules (resolved each turn):
-- Gap closeness reward: `5 * (1 - gap_ST / max_gap_ST)`, where `gap_ST` is the minimum number of additional filled blocks needed to make S and T 4-connected under the current map, and `max_gap_ST` is the same quantity on the initial empty map for this task.
-- Reward for newly connected Y pillars: `(new_connected_Y / total_Y) * 5`, where a Y counts as connected when it is 4-connected to S or T through filled blocks `*` and/or other Y pillars.
+- Gap closeness reward: `5 * (1 - gap_ST / max_gap_ST)`, where `gap_ST` is the minimum number of additional filled blocks needed to make anchor U and anchor V 4-connected under the current map, and `max_gap_ST` is the same quantity on the initial empty map for this task.
+- Reward for newly connected Y pillars: `(new_connected_Y / total_Y) * 5`, where a Y counts as connected when it is 4-connected to anchor U or anchor V through filled blocks `*` and/or other Y pillars.
 - Penalty for newly adjacent N pillars: `(new_adjacent_N / total_N) * 8`, where an N is adjacent if any filled block `*` is 4-neighbor adjacent to it.
 - Block placement cost: `(newly_placed_blocks / total_placeable_cells) * 5`.
-- Terminal connect reward: `+10` when S and T become 4-connected through filled blocks `*` and/or pillars (`Y`/`N`), not through static land `#`.
+- Terminal connect reward: `+10` when anchor U and anchor V become 4-connected through filled blocks `*` and/or pillars (`Y`/`N`), not through static land `#`.
 
 Execution rules:
-- Termination condition: turn limit reached or S/T already connected.
+- Termination condition: turn limit reached or anchor U and anchor V are already connected.
 
 Feedback:
 {feedback}
