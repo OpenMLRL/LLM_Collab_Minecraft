@@ -430,10 +430,37 @@ def main() -> int:
     def _reward_batch_item(
         *,
         batch_items: List[Mapping[str, Any]] | None,
+        turn_idx: int | None = None,
     ) -> Dict[str, Any]:
         if not batch_items:
             raise KeyError("bridge_build reward_func requires stable batch_items; prompt-based fallback has been removed")
-        return dict(batch_items[0] or {})
+        raw_item = dict(batch_items[0] or {})
+        ds_key = _dataset_key_from_item(raw_item)
+        if not ds_key:
+            return raw_item
+
+        base_item = dataset_prompt_map.get(ds_key)
+        if base_item is None:
+            dataset_prompt_map[ds_key] = dict(raw_item)
+            base_item = dataset_prompt_map[ds_key]
+
+        payload = dataset_payload_map.get(ds_key)
+        if turn_idx is None or int(turn_idx) <= 1:
+            payload = _payload_from_item(base_item)
+            dataset_payload_map[ds_key] = copy.deepcopy(payload)
+        elif payload is None:
+            payload = _payload_from_item(base_item)
+            dataset_payload_map[ds_key] = copy.deepcopy(payload)
+
+        mapped = dict(base_item)
+        state_before_turn = payload.get("state_before_turn")
+        if state_before_turn is not None:
+            mapped["_bridge_state_before_turn"] = copy.deepcopy(state_before_turn)
+            try:
+                mapped["_bridge_build_turn"] = int(state_before_turn.get("turn_index") or 1)
+            except Exception:
+                mapped["_bridge_build_turn"] = 1
+        return mapped
 
     def _require_dataset_item(dataset_key: str) -> Dict[str, Any]:
         ds_key = _normalize_key(dataset_key)
@@ -452,8 +479,9 @@ def main() -> int:
             agent1_completions: List[str],
             *,
             batch_items: List[Mapping[str, Any]] | None = None,
+            turn_idx: int | None = None,
         ) -> List[float]:
-            batch_item = _reward_batch_item(batch_items=batch_items)
+            batch_item = _reward_batch_item(batch_items=batch_items, turn_idx=turn_idx)
             return reward_base(agent1_completions, batch_items=[batch_item], prompts=prompts)
 
     else:
@@ -464,8 +492,9 @@ def main() -> int:
             agent2_completions: List[str],
             *,
             batch_items: List[Mapping[str, Any]] | None = None,
+            turn_idx: int | None = None,
         ) -> List[float]:
-            batch_item = _reward_batch_item(batch_items=batch_items)
+            batch_item = _reward_batch_item(batch_items=batch_items, turn_idx=turn_idx)
             return reward_base(
                 agent1_completions,
                 agent2_completions,
