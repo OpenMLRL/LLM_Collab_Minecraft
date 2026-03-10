@@ -68,11 +68,12 @@ Action format and budgets:
   Example: if current position is `[2,3]`, then `[[2,3],[2,4],[3,5]]` is valid, but `[[2,3],[1,1],[3,1]]` is invalid because it jumps.
 
 Reward/penalty rules (resolved each turn):
-- Gap closeness reward: `5 * (1 - gap_ST / max_gap_ST)`, where `gap_ST` is the minimum number of additional filled blocks needed to make anchor U and anchor V 4-connected under the current map, and `max_gap_ST` is the same quantity on the initial empty map for this task.
+- Gap improvement reward: `5 * (prev_gap_ST - gap_ST) / max_gap_ST`, where `gap_ST` is the minimum number of additional filled blocks needed to make anchor U and anchor V 4-connected under the current map, `prev_gap_ST` is the same quantity before this turn, and `max_gap_ST` is the same quantity on the initial empty map for this task.
+- CC merge reward: `3 * new_merge / (initial_cc_components - 1)`, where CC components are the 4-connected components formed by treating anchor U, anchor V, and all true Y pillars as special nodes, with filled blocks `*` allowed to connect them.
 - Reward for newly connected Y pillars: `(new_connected_Y / total_Y) * 5`, where a Y counts as connected when it is 4-connected to anchor U or anchor V through filled blocks `*` and/or other Y pillars.
 - Penalty for newly adjacent N pillars: `(new_adjacent_N / total_N) * 8`, where an N is adjacent if any filled block `*` is 4-neighbor adjacent to it.
 - Block placement cost: `(newly_placed_blocks / total_placeable_cells) * 5`.
-- Terminal connect reward: `+10` when anchor U and anchor V become 4-connected through filled blocks `*` and/or pillars (`Y`/`N`), not through static land `#`.
+- Terminal connect reward: `+2` when anchor U and anchor V become 4-connected through filled blocks `*` and/or pillars (`Y`/`N`), not through static land `#`.
 
 Execution rules:
 - Termination condition: turn limit reached or anchor U and anchor V are already connected.

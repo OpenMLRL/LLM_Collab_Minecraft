@@ -120,10 +120,12 @@ def get_reward_function(*, cfg: Dict[str, Any], num_agents: int) -> Callable[...
             {
                 "connected": 1.0 if bool(metrics.get("connected", False)) else 0.0,
                 "bonus_gap_st": float(metrics.get("bonus_gap_st", 0.0)),
+                "bonus_cc_merge": float(metrics.get("bonus_cc_merge", 0.0)),
                 "bonus_y_connected": float(metrics.get("bonus_y_connected", 0.0)),
                 "penalty_n_adjacent": -float(metrics.get("penalty_n_adjacent", 0.0)),
                 "penalty_block_cost": -float(metrics.get("penalty_block_cost", 0.0)),
                 "bonus_terminal_connect": float(metrics.get("bonus_terminal_connect", 0.0)),
+                "new_cc_merge_count": float(metrics.get("new_cc_merge_count", 0.0)),
                 "new_connected_y_count": float(metrics.get("new_connected_y_count", 0.0)),
                 "new_adjacent_n_count": float(metrics.get("new_adjacent_n_count", 0.0)),
                 "newly_placed_block_count": float(metrics.get("newly_placed_block_count", 0.0)),

@@ -517,15 +517,72 @@ def _extract_action_obj(text: str) -> Dict[str, Any]:
     if not raw:
         return {}
 
-    candidates: List[str] = [raw]
+    def _add_candidate(buf: str, out: List[str], seen: Set[str]) -> None:
+        cand = buf.strip()
+        if cand and cand not in seen:
+            out.append(cand)
+            seen.add(cand)
+
+    def _repair_json_brackets(buf: str) -> str:
+        chars: List[str] = []
+        closers: List[str] = []
+        in_string = False
+        string_quote = ""
+        escape = False
+
+        for cur in buf:
+            if in_string:
+                chars.append(cur)
+                if escape:
+                    escape = False
+                    continue
+                if cur == "\\":
+                    escape = True
+                    continue
+                if cur == string_quote:
+                    in_string = False
+                continue
+
+            if cur in ('"', "'"):
+                in_string = True
+                string_quote = cur
+                chars.append(cur)
+                continue
+            if cur == "{":
+                closers.append("}")
+                chars.append(cur)
+                continue
+            if cur == "[":
+                closers.append("]")
+                chars.append(cur)
+                continue
+            if cur in ("}", "]"):
+                if closers and cur == closers[-1]:
+                    closers.pop()
+                    chars.append(cur)
+                continue
+            chars.append(cur)
+
+        while closers:
+            chars.append(closers.pop())
+        return "".join(chars)
+
+    candidates: List[str] = []
+    seen_candidates: Set[str] = set()
+    _add_candidate(raw, candidates, seen_candidates)
+    _add_candidate(_repair_json_brackets(raw), candidates, seen_candidates)
+
     first = raw.find("{")
     last = raw.rfind("}")
+    if first >= 0:
+        tail = raw[first:]
+        _add_candidate(tail, candidates, seen_candidates)
+        _add_candidate(_repair_json_brackets(tail), candidates, seen_candidates)
     if 0 <= first < last:
         mid = raw[first : last + 1]
-        if mid not in candidates:
-            candidates.append(mid)
+        _add_candidate(mid, candidates, seen_candidates)
+        _add_candidate(_repair_json_brackets(mid), candidates, seen_candidates)
 
-    seen_candidates = set(candidates)
     n = len(raw)
     for start, ch in enumerate(raw):
         if ch != "{":
@@ -557,22 +614,21 @@ def _extract_action_obj(text: str) -> Dict[str, Any]:
                 continue
             depth -= 1
             if depth == 0:
-                cand = raw[start : end + 1].strip()
-                if cand and cand not in seen_candidates:
-                    candidates.append(cand)
-                    seen_candidates.add(cand)
+                cand = raw[start : end + 1]
+                _add_candidate(cand, candidates, seen_candidates)
+                _add_candidate(_repair_json_brackets(cand), candidates, seen_candidates)
                 break
             if depth < 0:
                 break
 
-    parsed_action_objs: List[Dict[str, Any]] = []
+    parsed_action_objs: List[Tuple[int, int, Dict[str, Any]]] = []
     parsed_dicts: List[Dict[str, Any]] = []
-    for cand in candidates:
+    for idx, cand in enumerate(candidates):
         try:
             obj = json.loads(cand)
             if isinstance(obj, dict):
                 if any(key in obj for key in _ACTION_KEYS):
-                    parsed_action_objs.append(obj)
+                    parsed_action_objs.append((sum(1 for key in _ACTION_KEYS if key in obj), idx, obj))
                 else:
                     parsed_dicts.append(obj)
         except Exception:
@@ -581,14 +637,14 @@ def _extract_action_obj(text: str) -> Dict[str, Any]:
             obj = ast.literal_eval(cand)
             if isinstance(obj, dict):
                 if any(key in obj for key in _ACTION_KEYS):
-                    parsed_action_objs.append(obj)
+                    parsed_action_objs.append((sum(1 for key in _ACTION_KEYS if key in obj), idx, obj))
                 else:
                     parsed_dicts.append(obj)
         except Exception:
             pass
 
     if parsed_action_objs:
-        return parsed_action_objs[-1]
+        return max(parsed_action_objs, key=lambda item: (item[0], item[1]))[2]
     if parsed_dicts:
         return parsed_dicts[-1]
     return {}
@@ -837,6 +893,32 @@ def _count_connected_y(task: TaskSpec, filled_set: Set[Coord2D]) -> int:
     return sum(1 for pos in task.true_pillars if pos in seen)
 
 
+def _count_cc_components(task: TaskSpec, filled_set: Set[Coord2D]) -> int:
+    focus: Set[Coord2D] = set(task.anchors_s) | set(task.anchors_t) | set(task.true_pillars)
+    if not focus:
+        return 0
+
+    traversable: Set[Coord2D] = set(focus) | set(filled_set)
+    seen: Set[Coord2D] = set()
+    components = 0
+
+    for seed in focus:
+        if seed in seen:
+            continue
+        components += 1
+        q: deque[Coord2D] = deque([seed])
+        seen.add(seed)
+        while q:
+            cur = q.popleft()
+            for nb in _neighbors4(cur):
+                if nb in seen or nb not in traversable:
+                    continue
+                seen.add(nb)
+                q.append(nb)
+
+    return int(components)
+
+
 def compute_visible_cells(
     origins: Iterable[Coord2D], *, view: int, width: int, height: int
 ) -> Set[Coord2D]:
@@ -932,22 +1014,29 @@ def apply_turn(
         frozen_n_adjacent_count = _count_n_adjacent(task, frozen_filled_set)
         frozen_connected_y_count = _count_connected_y(task, frozen_filled_set)
         frozen_gap_st = _gap_st(task, frozen_filled_set)
+        frozen_cc_component_count = _count_cc_components(task, frozen_filled_set)
+        initial_cc_component_count = _count_cc_components(task, set())
+        cc_merge_opportunities = max(1, int(initial_cc_component_count) - 1)
         frozen_max_gap_st = _gap_st(task, set())
         if frozen_max_gap_st is None or frozen_max_gap_st <= 0:
             frozen_max_gap_st = 1
-        frozen_gap_for_reward = int(frozen_max_gap_st if frozen_gap_st is None else frozen_gap_st)
         metrics = {
             "reward": 0.0,
-            "bonus_gap_st": 5.0 * (1.0 - (float(frozen_gap_for_reward) / float(frozen_max_gap_st))),
+            "bonus_gap_st": 0.0,
+            "bonus_cc_merge": 0.0,
             "bonus_y_connected": 0.0,
             "penalty_n_adjacent": 0.0,
             "penalty_block_cost": 0.0,
             "bonus_terminal_connect": 0.0,
             "gap_st": None if frozen_gap_st is None else int(frozen_gap_st),
             "max_gap_st": int(frozen_max_gap_st),
+            "cc_component_count": int(frozen_cc_component_count),
+            "initial_cc_component_count": int(initial_cc_component_count),
+            "cc_merge_opportunities": int(cc_merge_opportunities),
             "connected_y_count": int(frozen_connected_y_count),
             "n_adjacent_count": int(frozen_n_adjacent_count),
             "y_uncovered_count": int(max(0, len(task.true_pillars) - frozen_connected_y_count)),
+            "new_cc_merge_count": 0,
             "new_connected_y_count": 0,
             "new_adjacent_n_count": 0,
             "newly_placed_block_count": 0,
@@ -1034,11 +1123,17 @@ def apply_turn(
     n_adjacent_count = _count_n_adjacent(task, filled_set)
     prev_connected_y_count = _count_connected_y(task, prev_filled_set)
     connected_y_count = _count_connected_y(task, filled_set)
+    prev_cc_component_count = _count_cc_components(task, prev_filled_set)
+    cc_component_count = _count_cc_components(task, filled_set)
+    initial_cc_component_count = _count_cc_components(task, set())
+    cc_merge_opportunities = max(1, int(initial_cc_component_count) - 1)
     y_uncovered_count = max(0, len(task.true_pillars) - connected_y_count)
+    prev_gap_st = _gap_st(task, prev_filled_set)
     gap_st = _gap_st(task, filled_set)
     max_gap_st = _gap_st(task, set())
     if max_gap_st is None or max_gap_st <= 0:
         max_gap_st = 1
+    prev_gap_for_reward = int(max_gap_st if prev_gap_st is None else prev_gap_st)
     gap_st_for_reward = int(max_gap_st if gap_st is None else gap_st)
 
     connected = is_connected_st(task, nxt.filled)
@@ -1049,16 +1144,18 @@ def apply_turn(
     total_n = max(1, len(task.false_pillars))
     total_placeable = max(1, (task.width * task.height) - len(task.land_cells) - len(task.candidate_pillars))
 
+    new_cc_merge_count = max(0, prev_cc_component_count - cc_component_count)
     new_connected_y_count = max(0, connected_y_count - prev_connected_y_count)
     new_adjacent_n_count = max(0, n_adjacent_count - prev_n_adjacent_count)
     newly_placed_block_count = len(filled_set - prev_filled_set)
 
-    bonus_gap_st = 5.0 * (1.0 - (float(gap_st_for_reward) / float(max_gap_st)))
+    bonus_gap_st = 5.0 * (float(prev_gap_for_reward - gap_st_for_reward) / float(max_gap_st))
+    bonus_cc_merge = 3.0 * (float(new_cc_merge_count) / float(cc_merge_opportunities))
     bonus_y_connected = (float(new_connected_y_count) / float(total_y)) * 5.0
     penalty_n = (float(new_adjacent_n_count) / float(total_n)) * 8.0
     penalty_block = (float(newly_placed_block_count) / float(total_placeable)) * 5.0
-    bonus_terminal_connect = 10.0 if (connected and not state.connected) else 0.0
-    reward = bonus_gap_st + bonus_y_connected - penalty_n - penalty_block + bonus_terminal_connect
+    bonus_terminal_connect = 2.0 if (connected and not state.connected) else 0.0
+    reward = bonus_gap_st + bonus_cc_merge + bonus_y_connected - penalty_n - penalty_block + bonus_terminal_connect
 
     nxt.turn_index = int(state.turn_index) + 1
     nxt.connected = bool(connected)
@@ -1067,15 +1164,20 @@ def apply_turn(
     metrics = {
         "reward": reward,
         "bonus_gap_st": bonus_gap_st,
+        "bonus_cc_merge": bonus_cc_merge,
         "bonus_y_connected": bonus_y_connected,
         "penalty_n_adjacent": penalty_n,
         "penalty_block_cost": penalty_block,
         "bonus_terminal_connect": bonus_terminal_connect,
         "gap_st": None if gap_st is None else int(gap_st),
         "max_gap_st": int(max_gap_st),
+        "cc_component_count": int(cc_component_count),
+        "initial_cc_component_count": int(initial_cc_component_count),
+        "cc_merge_opportunities": int(cc_merge_opportunities),
         "connected_y_count": int(connected_y_count),
         "n_adjacent_count": int(n_adjacent_count),
         "y_uncovered_count": int(y_uncovered_count),
+        "new_cc_merge_count": int(new_cc_merge_count),
         "new_connected_y_count": int(new_connected_y_count),
         "new_adjacent_n_count": int(new_adjacent_n_count),
         "newly_placed_block_count": int(newly_placed_block_count),
