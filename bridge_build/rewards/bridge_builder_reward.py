@@ -67,7 +67,7 @@ def get_reward_function(*, cfg: Dict[str, Any], num_agents: int) -> Callable[...
         task_cfg = {}
 
     max_commands_total = _as_int(task_cfg.get("max_commands", 40), 40)
-    max_probe = max(0, min(2, _as_int(task_cfg.get("max_probe", 2), 2)))
+    max_probe = max(0, min(3, _as_int(task_cfg.get("max_probe", 2), 2)))
     view = max(0, _as_int(task_cfg.get("view", 3), 3))
 
     allowed_blocks_agent1 = _as_block_list(task_cfg.get("block_agent1"))

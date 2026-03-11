@@ -188,7 +188,7 @@ def _prepare_prompt_context(cfg: Dict[str, Any], *, num_agents: int) -> Dict[str
         "user_template_agent1": str(prompt_cfg.get("user_template_agent1") or prompt_cfg.get("user_template") or "").rstrip(),
         "user_template_agent2": str(prompt_cfg.get("user_template_agent2") or prompt_cfg.get("user_template") or "").rstrip(),
         "view": max(0, int(task_cfg.get("view", 3))),
-        "max_probe": max(0, min(2, int(task_cfg.get("max_probe", 2)))),
+        "max_probe": max(0, min(3, int(task_cfg.get("max_probe", 2)))),
         "max_commands_total": max(1, int(task_cfg.get("max_commands", 40))),
         "agent1_blocks": agent1_blocks,
         "agent2_blocks": agent2_blocks,

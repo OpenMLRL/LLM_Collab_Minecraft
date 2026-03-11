@@ -33,7 +33,7 @@ prompt:
 
 task:
   view: 3
-  max_probe: 2
+  max_probe: 3
   max_commands: 40
   block_agent1:
   - oak_planks
