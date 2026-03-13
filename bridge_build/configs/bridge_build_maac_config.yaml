@@ -26,7 +26,7 @@ dataset:
   type: bridge_build
   train_split: '[:8]'
   eval_split: '[8:]'
-  json_path: ../dataset/data.json
+  json_path: ../dataset/data2.json
 
 prompt:
   use_chat_template: true
