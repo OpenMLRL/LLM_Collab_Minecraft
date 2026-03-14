@@ -1,0 +1,95 @@
+agent_model:
+  name: Qwen/Qwen3-4B-Instruct-2507
+  type: qwen
+  temperature: 0.6
+  top_p: 0.6
+  top_k: null
+  max_length: 2048
+  dtype: bf16
+
+critic_model:
+  name: Qwen/Qwen3-4B-Instruct-2507
+  type: qwen
+  max_length: 2048
+  dtype: bf16
+
+seed: 42
+debug: true
+
+dataset:
+  name: bridge_build
+  type: bridge_build
+  train_split: '[:4]'
+  eval_split: '[:4]'
+  json_path: ../../bridge_build/dataset/data2.json
+
+prompt:
+  use_chat_template: true
+
+task:
+  view: 3
+  max_probe: 3
+  max_commands: 40
+  block_agent1:
+  - oak_planks
+  block_agent2:
+  - oak_planks
+
+output:
+  base_dir: output_bcmaac_bridge_build
+  verbose: true
+  save_final_model: false
+  save_path: output_bcmaac_bridge_build
+
+external:
+  mode: empty_feedback
+  original_prompt: true
+  previous_response: false
+
+bcmaac:
+  agent_devices:
+  - cuda:0
+  critic_devices:
+  - cuda:0
+  num_agents: 2
+  num_turns: 4
+  critic_type: v
+  num_train_epochs: 150
+  agent_learning_rate: 2.5e-6
+  critic_learning_rate: 2.5e-6
+  rollout_buffer_size: 1
+  train_batch_size: 1
+  value_loss_coef: 0.6
+  max_new_tokens: 300
+  discount: 0.9
+  eval_interval: 10
+  eval_num_samples: 2
+  eval_batch_size: 1
+  logging_steps: 20
+
+meta:
+  context_learning_rate: 1.0e-4
+  context_hidden_dim: 128
+  context_cnn_channels: 32
+  context_scalar_hidden_dim: 64
+  task_loss_coef: 0.5
+  entropy_coef: 0.0
+  max_grad_norm: 1.0
+  value_head_hidden_dim: 256
+  actor_condition_dim: 128
+  critic_condition_dim: 128
+
+reward_processor:
+  enabled: true
+  scale_factor: 1.0
+  shift: 0.0
+
+wandb:
+  project: bridge_build_meta
+  entity: OpenMLRL
+  run_name: bridge_build_bcmaac_data2
+  dir: output_bcmaac_bridge_build
+  tags:
+  - bcmaac
+  - bridge_build
+  - meta
