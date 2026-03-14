@@ -123,7 +123,11 @@ class BCMAACTrainer:
         self.verbose = bool(verbose)
         self.critic_type = (self.args.critic_type or "v").lower()
 
-        self.device = self._resolve_device(agent_devices, critic_devices)
+        self.agent_devices = self._resolve_agent_devices(agent_devices)
+        self.critic_device = self._resolve_critic_device(
+            critic_devices,
+            fallback_device=self.agent_devices[0],
+        )
         self.agent_tokenizers = self._resolve_tokenizers(agent_model, agents)
         self.critic_tokenizer = self._resolve_critic_tokenizer(critic_model, critics)
         if self.adapter.tokenizer is None:
@@ -144,11 +148,11 @@ class BCMAACTrainer:
             task_vocab_size=self.adapter.task_vocab_size,
             cnn_channels=self.args.context_cnn_channels,
             scalar_hidden_dim=self.args.context_scalar_hidden_dim,
-        ).to(self.device)
+        ).to(self.critic_device)
 
-        for actor in self.agents:
-            actor.to(self.device)
-        self.critic.to(self.device)
+        for actor, device in zip(self.agents, self.agent_devices):
+            actor.to(device)
+        self.critic.to(self.critic_device)
 
         self.actor_optimizers = [
             torch.optim.AdamW(actor.parameters(), lr=self.args.agent_learning_rate)
@@ -269,8 +273,8 @@ class BCMAACTrainer:
             with torch.no_grad():
                 for agent_idx in range(self.args.num_agents):
                     encoder_out = self.context_encoder.forward_step(
-                        grid=meta_obs[agent_idx].grid.unsqueeze(0).to(self.device),
-                        scalars=meta_obs[agent_idx].scalars.unsqueeze(0).to(self.device),
+                        grid=meta_obs[agent_idx].grid.unsqueeze(0).to(self.critic_device),
+                        scalars=meta_obs[agent_idx].scalars.unsqueeze(0).to(self.critic_device),
                         hidden=hidden_states[agent_idx],
                     )
                     hidden_states[agent_idx] = encoder_out.hidden.detach()
@@ -369,13 +373,13 @@ class BCMAACTrainer:
                     if hidden_in is not None:
                         hidden_in = hidden_in.detach()
                     encoder_out = self.context_encoder.forward_step(
-                        grid=obs.grid.unsqueeze(0).to(self.device),
-                        scalars=obs.scalars.unsqueeze(0).to(self.device),
+                        grid=obs.grid.unsqueeze(0).to(self.critic_device),
+                        scalars=obs.scalars.unsqueeze(0).to(self.critic_device),
                         hidden=hidden_in,
                     )
                     hidden_states[agent_idx] = encoder_out.hidden.detach()
                     contexts.append(encoder_out.context)
-                    target = torch.tensor([obs.task_index], device=self.device, dtype=torch.long)
+                    target = torch.tensor([obs.task_index], device=self.critic_device, dtype=torch.long)
                     turn_task_losses.append(F.cross_entropy(encoder_out.task_logits, target))
 
                 joint_context = self.adapter.build_joint_context(contexts)
@@ -384,16 +388,17 @@ class BCMAACTrainer:
                     action_completions=turn.completions if self.critic_type == "q" else None,
                 )
                 value = self._critic_value_from_text(critic_input, joint_context)
-                ret = torch.tensor([returns[turn_idx]], device=self.device, dtype=value.dtype)
+                ret = torch.tensor([returns[turn_idx]], device=self.critic_device, dtype=value.dtype)
                 value_loss_turn = (value - ret).pow(2).mean()
 
-                actor_turn_losses: List[torch.Tensor] = []
-                entropy_turn_terms: List[torch.Tensor] = []
+                actor_turn_loss_values: List[float] = []
+                entropy_turn_values: List[float] = []
                 adv_value = float(normalized_advantages[traj_idx][turn_idx])
-                adv_tensor = torch.tensor([adv_value], device=self.device, dtype=ret.dtype)
+                num_actor_terms = max(1, self.args.num_agents)
                 for agent_idx in range(self.args.num_agents):
-                    sequence = turn.sequences[agent_idx].unsqueeze(0).to(self.device)
-                    attention_mask = turn.attention_masks[agent_idx].unsqueeze(0).to(self.device)
+                    actor_device = self.agent_devices[agent_idx]
+                    sequence = turn.sequences[agent_idx].unsqueeze(0).to(actor_device)
+                    attention_mask = turn.attention_masks[agent_idx].unsqueeze(0).to(actor_device)
                     prompt_len = int(turn.prompt_lens[agent_idx])
                     response_len = int(turn.response_lens[agent_idx])
                     logprob, entropy = self._sequence_logprob(
@@ -404,44 +409,48 @@ class BCMAACTrainer:
                         response_len=response_len,
                         context_vec=contexts[agent_idx],
                     )
-                    actor_turn_losses.append(-(logprob.squeeze(0) * adv_tensor.to(logprob.dtype)))
-                    entropy_turn_terms.append(entropy.squeeze(0))
+                    adv_tensor = torch.tensor([adv_value], device=actor_device, dtype=logprob.dtype)
+                    actor_loss = -(logprob.squeeze(0) * adv_tensor).mean()
+                    entropy_value = entropy.squeeze(0).mean()
+                    scaled_actor_loss = (
+                        actor_loss - float(self.args.entropy_coef) * entropy_value
+                    ) / (float(total_turns) * float(num_actor_terms))
+                    scaled_actor_loss.backward(retain_graph=True)
+                    actor_turn_loss_values.append(float(actor_loss.detach().item()))
+                    entropy_turn_values.append(float(entropy_value.detach().item()))
 
-                actor_loss_turn = (
-                    torch.stack(actor_turn_losses).mean()
-                    if actor_turn_losses
-                    else torch.zeros((), device=self.device, dtype=ret.dtype)
-                )
                 task_loss_turn = (
                     torch.stack(turn_task_losses).mean()
                     if turn_task_losses
-                    else torch.zeros((), device=self.device, dtype=ret.dtype)
+                    else torch.zeros((), device=self.critic_device, dtype=ret.dtype)
+                )
+                shared_turn_loss = (
+                    self.args.value_loss_coef * value_loss_turn
+                    + self.args.task_loss_coef * task_loss_turn
+                ) / float(total_turns)
+                shared_turn_loss.backward()
+
+                actor_loss_turn = (
+                    sum(actor_turn_loss_values) / float(len(actor_turn_loss_values))
+                    if actor_turn_loss_values
+                    else 0.0
                 )
                 entropy_turn = (
-                    torch.stack(entropy_turn_terms).mean()
-                    if entropy_turn_terms
-                    else torch.zeros((), device=self.device, dtype=ret.dtype)
+                    sum(entropy_turn_values) / float(len(entropy_turn_values))
+                    if entropy_turn_values
+                    else 0.0
                 )
 
-                turn_loss = (
-                    actor_loss_turn
-                    + self.args.value_loss_coef * value_loss_turn
-                    + self.args.task_loss_coef * task_loss_turn
-                    - self.args.entropy_coef * entropy_turn
-                ) / float(total_turns)
-                turn_loss.backward()
-
-                metrics_accum["policy_loss"] += float(actor_loss_turn.detach().item())
+                metrics_accum["policy_loss"] += float(actor_loss_turn)
                 metrics_accum["value_loss"] += float(value_loss_turn.detach().item())
                 metrics_accum["task_loss"] += float(task_loss_turn.detach().item())
-                metrics_accum["entropy"] += float(entropy_turn.detach().item())
+                metrics_accum["entropy"] += float(entropy_turn)
 
         if self.args.max_grad_norm is not None and self.args.max_grad_norm > 0:
-            modules: List[nn.Module] = [self.context_encoder, self.critic, *self.agents]
-            torch.nn.utils.clip_grad_norm_(
-                [p for module in modules for p in module.parameters() if p.requires_grad],
-                max_norm=float(self.args.max_grad_norm),
-            )
+            self._clip_grad_norm(self.context_encoder, float(self.args.max_grad_norm))
+            self._clip_grad_norm(self.critic, float(self.args.max_grad_norm))
+            for actor in self.agents:
+                self._clip_grad_norm(actor, float(self.args.max_grad_norm))
 
         self.context_optimizer.step()
         self.critic_optimizer.step()
@@ -464,6 +473,7 @@ class BCMAACTrainer:
         context_vec: torch.Tensor,
         training: bool,
     ) -> Dict[str, Any]:
+        model_device = self._module_device(model)
         max_ctx = self._max_context_length(model.model, tokenizer)
         prompt_budget = max(1, max_ctx - 1)
         encoded = tokenizer(
@@ -472,14 +482,15 @@ class BCMAACTrainer:
             truncation=True,
             max_length=prompt_budget,
         )
-        input_ids = encoded["input_ids"].to(self.device)
-        attention_mask = encoded["attention_mask"].to(self.device)
-        prompt_len = int(input_ids.size(1))
+        prompt_input_ids = encoded["input_ids"].to(model_device)
+        attention_mask = encoded["attention_mask"].to(model_device)
+        prompt_len = int(prompt_input_ids.size(1))
+        context_vec = context_vec.to(model_device)
 
         with torch.no_grad():
-            context_mask = torch.ones_like(input_ids, device=self.device, dtype=torch.float32)
+            context_mask = torch.ones_like(prompt_input_ids, device=model_device, dtype=torch.float32)
             outputs = model(
-                input_ids=input_ids,
+                input_ids=prompt_input_ids,
                 attention_mask=attention_mask,
                 context_vec=context_vec,
                 context_mask=context_mask,
@@ -502,7 +513,7 @@ class BCMAACTrainer:
                 attention_mask = torch.cat(
                     [
                         attention_mask,
-                        torch.ones((1, 1), device=self.device, dtype=attention_mask.dtype),
+                        torch.ones((1, 1), device=model_device, dtype=attention_mask.dtype),
                     ],
                     dim=1,
                 )
@@ -522,9 +533,9 @@ class BCMAACTrainer:
             pad_id = getattr(tokenizer, "pad_token_id", None)
             if pad_id is None:
                 pad_id = getattr(tokenizer, "eos_token_id", 0) or 0
-            generated_ids = torch.tensor([[int(pad_id)]], device=self.device)
-        full_sequence = torch.cat([encoded["input_ids"].to(self.device), generated_ids], dim=1)
-        full_attention_mask = torch.ones_like(full_sequence, device=self.device)
+            generated_ids = torch.tensor([[int(pad_id)]], device=model_device)
+        full_sequence = torch.cat([prompt_input_ids, generated_ids], dim=1)
+        full_attention_mask = torch.ones_like(full_sequence, device=model_device)
         completion = tokenizer.decode(generated_ids[0], skip_special_tokens=True)
         return {
             "sequence": full_sequence.squeeze(0),
@@ -570,7 +581,11 @@ class BCMAACTrainer:
         response_len: int,
         context_vec: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        context_mask = torch.zeros_like(sequences, dtype=torch.float32, device=self.device)
+        model_device = self._module_device(model)
+        sequences = sequences.to(model_device)
+        attention_mask = attention_mask.to(model_device)
+        context_vec = context_vec.to(model_device)
+        context_mask = torch.zeros_like(sequences, dtype=torch.float32, device=model_device)
         context_mask[:, :prompt_len] = 1.0
         outputs = model(
             input_ids=sequences,
@@ -606,9 +621,10 @@ class BCMAACTrainer:
             truncation=True,
             max_length=max_ctx,
         )
-        input_ids = encoded["input_ids"].to(self.device)
-        attention_mask = encoded["attention_mask"].to(self.device)
-        context_mask = torch.ones_like(input_ids, dtype=torch.float32, device=self.device)
+        input_ids = encoded["input_ids"].to(self.critic_device)
+        attention_mask = encoded["attention_mask"].to(self.critic_device)
+        joint_context = joint_context.to(self.critic_device)
+        context_mask = torch.ones_like(input_ids, dtype=torch.float32, device=self.critic_device)
         outputs = self.critic(
             input_ids=input_ids,
             attention_mask=attention_mask,
@@ -679,8 +695,8 @@ class BCMAACTrainer:
                         if hidden_in is not None:
                             hidden_in = hidden_in.detach()
                         encoder_out = self.context_encoder.forward_step(
-                            grid=obs.grid.unsqueeze(0).to(self.device),
-                            scalars=obs.scalars.unsqueeze(0).to(self.device),
+                            grid=obs.grid.unsqueeze(0).to(self.critic_device),
+                            scalars=obs.scalars.unsqueeze(0).to(self.critic_device),
                             hidden=hidden_in,
                         )
                         hidden_states[agent_idx] = encoder_out.hidden.detach()
@@ -694,7 +710,7 @@ class BCMAACTrainer:
                     value = self._critic_value_from_text(critic_input, joint_context).detach().view(-1)[0]
                     adv = torch.tensor(
                         float(returns[turn_idx]) - float(value.item()),
-                        device=self.device,
+                        device=self.critic_device,
                         dtype=torch.float32,
                     )
                     traj_advantages.append(float(adv.item()))
@@ -874,17 +890,44 @@ class BCMAACTrainer:
             out["torch_dtype"] = cfg.get("dtype")
         return out
 
-    def _resolve_device(
+    def _resolve_agent_devices(
         self,
         agent_devices: Optional[Union[str, Sequence[str]]],
+    ) -> List[torch.device]:
+        raw_devices: List[str] = []
+        if isinstance(agent_devices, (list, tuple)):
+            raw_devices = [str(device).strip() for device in agent_devices if str(device).strip()]
+        elif isinstance(agent_devices, str) and agent_devices.strip():
+            raw_devices = [agent_devices.strip()]
+        if not raw_devices:
+            raw_devices = ["cuda:0" if torch.cuda.is_available() else "cpu"]
+        resolved = [torch.device(device) for device in raw_devices]
+        return [resolved[idx % len(resolved)] for idx in range(self.args.num_agents)]
+
+    def _resolve_critic_device(
+        self,
         critic_devices: Optional[Union[str, Sequence[str]]],
+        *,
+        fallback_device: torch.device,
     ) -> torch.device:
-        del critic_devices
-        if isinstance(agent_devices, (list, tuple)) and agent_devices:
-            return torch.device(str(agent_devices[0]))
-        if isinstance(agent_devices, str) and agent_devices.strip():
-            return torch.device(agent_devices.strip())
-        return torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        if isinstance(critic_devices, (list, tuple)):
+            for device in critic_devices:
+                text = str(device).strip()
+                if text:
+                    return torch.device(text)
+        elif isinstance(critic_devices, str) and critic_devices.strip():
+            return torch.device(critic_devices.strip())
+        return fallback_device
+
+    def _module_device(self, module: nn.Module) -> torch.device:
+        for parameter in module.parameters():
+            return parameter.device
+        return self.critic_device
+
+    def _clip_grad_norm(self, module: nn.Module, max_norm: float) -> None:
+        params = [param for param in module.parameters() if param.requires_grad and param.grad is not None]
+        if params:
+            torch.nn.utils.clip_grad_norm_(params, max_norm=max_norm)
 
     def _max_context_length(self, model: nn.Module, tokenizer: Any) -> int:
         config = getattr(model, "config", None)
