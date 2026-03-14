@@ -185,45 +185,44 @@ class BCMAACTrainer:
                 trajectory = self._collect_episode(item, training=True)
                 buffer.append(trajectory)
 
-                rollout_metrics = self._summarize_trajectory(trajectory)
-                for key, value in rollout_metrics.items():
-                    epoch_metrics[key].append(value)
-
                 if len(buffer) >= self.args.rollout_buffer_size:
                     update_metrics = self._update(buffer)
                     for key, value in update_metrics.items():
                         epoch_metrics[key].append(value)
-                    self._log_metrics(update_metrics)
+                    if self._should_log_train():
+                        self._log_metrics(update_metrics)
                     buffer = []
 
             if buffer:
                 update_metrics = self._update(buffer)
                 for key, value in update_metrics.items():
                     epoch_metrics[key].append(value)
-                self._log_metrics(update_metrics)
+                if self._should_log_train():
+                    self._log_metrics(update_metrics)
 
-            summary = self._summarize_epoch(epoch_metrics)
-            if self.verbose:
-                print(f"Epoch {epoch + 1}/{self.args.num_train_epochs} metrics: {summary}")
-            self._log_metrics({f"train/{k}": v for k, v in summary.items()})
+            epoch_log = self._build_epoch_log(epoch_metrics)
+            if self.verbose and epoch_log:
+                print(f"Epoch {epoch + 1}/{self.args.num_train_epochs} metrics: {epoch_log}")
+            if epoch_log:
+                self._log_metrics(epoch_log)
 
             if self.eval_items and self.args.eval_interval > 0 and (epoch + 1) % self.args.eval_interval == 0:
                 eval_summary = self.evaluate()
                 if self.verbose:
                     print(f"Eval @ epoch {epoch + 1}: {eval_summary}")
-                self._log_metrics({f"eval/{k}": v for k, v in eval_summary.items()})
+                self._log_metrics(eval_summary)
 
     def evaluate(self) -> Dict[str, float]:
         max_items = min(len(self.eval_items), max(1, int(self.args.eval_num_samples)))
         if max_items <= 0:
             return {}
-        metrics: Dict[str, List[float]] = defaultdict(list)
+        trajectories: List[EpisodeTrajectory] = []
         for item in self.eval_items[:max_items]:
             trajectory = self._collect_episode(item, training=False)
-            traj_metrics = self._summarize_trajectory(trajectory)
-            for key, value in traj_metrics.items():
-                metrics[key].append(value)
-        return self._summarize_epoch(metrics)
+            trajectories.append(trajectory)
+        _advantages, rollout_metrics = self._compute_rollout_statistics(trajectories)
+        flat = self._flatten_turn_metrics(rollout_metrics)
+        return {f"eval/{key}": value for key, value in flat.items()}
 
     def save_model(self, output_dir: str) -> None:
         os.makedirs(output_dir, exist_ok=True)
@@ -340,7 +339,7 @@ class BCMAACTrainer:
         if not trajectories:
             return {}
 
-        normalized_advantages = self._compute_normalized_turn_advantages(trajectories)
+        normalized_advantages, rollout_metrics = self._compute_rollout_statistics(trajectories)
         total_turns = max(1, sum(len(traj.turns) for traj in trajectories))
 
         self.context_encoder.train()
@@ -348,9 +347,9 @@ class BCMAACTrainer:
         for actor in self.agents:
             actor.train()
 
-        metrics_accum = {
-            "policy_loss": 0.0,
-            "value_loss": 0.0,
+        per_turn_policy_loss: Dict[int, List[float]] = defaultdict(list)
+        per_turn_value_loss: Dict[int, List[float]] = defaultdict(list)
+        extra_loss_accum = {
             "task_loss": 0.0,
             "entropy": 0.0,
         }
@@ -441,10 +440,10 @@ class BCMAACTrainer:
                     else 0.0
                 )
 
-                metrics_accum["policy_loss"] += float(actor_loss_turn)
-                metrics_accum["value_loss"] += float(value_loss_turn.detach().item())
-                metrics_accum["task_loss"] += float(task_loss_turn.detach().item())
-                metrics_accum["entropy"] += float(entropy_turn)
+                per_turn_policy_loss[turn_idx].append(float(actor_loss_turn))
+                per_turn_value_loss[turn_idx].append(float(value_loss_turn.detach().item()))
+                extra_loss_accum["task_loss"] += float(task_loss_turn.detach().item())
+                extra_loss_accum["entropy"] += float(entropy_turn)
 
         if self.args.max_grad_norm is not None and self.args.max_grad_norm > 0:
             self._clip_grad_norm(self.context_encoder, float(self.args.max_grad_norm))
@@ -457,12 +456,16 @@ class BCMAACTrainer:
         for optimizer in self.actor_optimizers:
             optimizer.step()
 
-        return {
-            "policy_loss": float(metrics_accum["policy_loss"] / float(total_turns)),
-            "value_loss": float(metrics_accum["value_loss"] / float(total_turns)),
-            "task_loss": float(metrics_accum["task_loss"] / float(total_turns)),
-            "entropy": float(metrics_accum["entropy"] / float(total_turns)),
-        }
+        for turn_idx, values in per_turn_policy_loss.items():
+            if values:
+                rollout_metrics.setdefault(turn_idx, {})["policy_loss"] = float(sum(values) / len(values))
+        for turn_idx, values in per_turn_value_loss.items():
+            if values:
+                rollout_metrics.setdefault(turn_idx, {})["value_loss"] = float(sum(values) / len(values))
+
+        rollout_metrics.setdefault(0, {})["task_loss"] = float(extra_loss_accum["task_loss"] / float(total_turns))
+        rollout_metrics.setdefault(0, {})["entropy"] = float(extra_loss_accum["entropy"] / float(total_turns))
+        return self._flatten_turn_metrics(rollout_metrics)
 
     def _sample_completion(
         self,
@@ -669,10 +672,10 @@ class BCMAACTrainer:
         std = flat.std(unbiased=False).clamp(min=1e-6)
         return [((adv.to(torch.float32) - mean) / std) for adv in advantages]
 
-    def _compute_normalized_turn_advantages(
+    def _compute_rollout_statistics(
         self,
         trajectories: Sequence[EpisodeTrajectory],
-    ) -> List[List[float]]:
+    ) -> Tuple[List[List[float]], Dict[int, Dict[str, float]]]:
         self.context_encoder.eval()
         self.critic.eval()
         for actor in self.agents:
@@ -680,6 +683,10 @@ class BCMAACTrainer:
 
         advantages: List[List[float]] = []
         flat_advantages: List[torch.Tensor] = []
+        turn_rewards: Dict[int, List[float]] = defaultdict(list)
+        turn_returns: Dict[int, List[float]] = defaultdict(list)
+        turn_values: Dict[int, List[float]] = defaultdict(list)
+        turn_targets: Dict[int, List[float]] = defaultdict(list)
 
         with torch.no_grad():
             for traj in trajectories:
@@ -708,6 +715,10 @@ class BCMAACTrainer:
                         action_completions=turn.completions if self.critic_type == "q" else None,
                     )
                     value = self._critic_value_from_text(critic_input, joint_context).detach().view(-1)[0]
+                    turn_rewards[turn_idx].append(float(turn.reward))
+                    turn_returns[turn_idx].append(float(returns[turn_idx]))
+                    turn_values[turn_idx].append(float(value.item()))
+                    turn_targets[turn_idx].append(float(returns[turn_idx]))
                     adv = torch.tensor(
                         float(returns[turn_idx]) - float(value.item()),
                         device=self.critic_device,
@@ -727,19 +738,20 @@ class BCMAACTrainer:
                 [float(normalized_flat[cursor + idx].item()) for idx in range(count)]
             )
             cursor += count
-        return normalized_advantages
-
-    def _summarize_trajectory(self, trajectory: EpisodeTrajectory) -> Dict[str, float]:
-        if not trajectory.turns:
-            return {}
-        total_reward = float(sum(turn.reward for turn in trajectory.turns))
-        final_metrics = trajectory.turns[-1].metrics
-        return {
-            "reward_sum": total_reward,
-            "final_reward": float(trajectory.turns[-1].reward),
-            "final_gap": float(final_metrics.get("gap_st") if final_metrics.get("gap_st") is not None else 0.0),
-            "final_connected": 1.0 if bool(final_metrics.get("connected", False)) else 0.0,
-        }
+        rollout_metrics: Dict[int, Dict[str, float]] = {}
+        for turn_idx in sorted(set(turn_rewards.keys()) | set(turn_returns.keys()) | set(turn_values.keys()) | set(turn_targets.keys())):
+            metrics: Dict[str, float] = {}
+            if turn_rewards.get(turn_idx):
+                metrics["reward_mean"] = float(sum(turn_rewards[turn_idx]) / len(turn_rewards[turn_idx]))
+            if turn_returns.get(turn_idx):
+                metrics["expected_return"] = float(sum(turn_returns[turn_idx]) / len(turn_returns[turn_idx]))
+            if turn_values.get(turn_idx):
+                metrics["value_pred_mean"] = float(sum(turn_values[turn_idx]) / len(turn_values[turn_idx]))
+            if turn_targets.get(turn_idx):
+                metrics["value_target_mean"] = float(sum(turn_targets[turn_idx]) / len(turn_targets[turn_idx]))
+            if metrics:
+                rollout_metrics[turn_idx] = metrics
+        return normalized_advantages, rollout_metrics
 
     def _summarize_epoch(self, metrics: Mapping[str, Sequence[float]]) -> Dict[str, float]:
         out: Dict[str, float] = {}
@@ -749,12 +761,54 @@ class BCMAACTrainer:
                 out[key] = float(sum(vals) / len(vals))
         return out
 
+    def _flatten_turn_metrics(
+        self,
+        metrics_by_turn: Mapping[int, Mapping[str, float]],
+    ) -> Dict[str, float]:
+        flat: Dict[str, float] = {}
+        for turn_idx in sorted(metrics_by_turn.keys()):
+            prefix = f"turn_{turn_idx + 1}/"
+            for key, value in metrics_by_turn[turn_idx].items():
+                flat[prefix + key] = float(value)
+        return flat
+
+    def _build_epoch_log(self, epoch_metrics: Mapping[str, Sequence[float]]) -> Dict[str, float]:
+        epoch_log: Dict[str, float] = {}
+        for turn_idx in range(max(1, int(self.args.num_turns))):
+            prefix = f"turn_{turn_idx + 1}/"
+
+            def _maybe_log(metric_key: str, epoch_key: str) -> None:
+                values = epoch_metrics.get(prefix + metric_key)
+                if values:
+                    epoch_log[prefix + epoch_key] = float(sum(values) / len(values))
+
+            _maybe_log("reward_mean", "epoch_reward_mean")
+            _maybe_log("expected_return", "epoch_avg_return")
+            _maybe_log("value_pred_mean", "epoch_value_pred_mean")
+            _maybe_log("value_target_mean", "epoch_value_target_mean")
+            _maybe_log("policy_loss", "epoch_policy_loss")
+            _maybe_log("value_loss", "epoch_value_loss")
+            if turn_idx == 0:
+                _maybe_log("task_loss", "epoch_task_loss")
+                _maybe_log("entropy", "epoch_entropy")
+        return epoch_log
+
     def _log_metrics(self, metrics: Mapping[str, float]) -> None:
         if not metrics:
             return
         if not self.wandb_initialized or wandb is None:
             return
         wandb.log(dict(metrics), step=self.env_step)
+
+    def _should_log_train(self) -> bool:
+        interval = int(getattr(self.args, "logging_steps", 1))
+        if interval <= 1:
+            self._last_logged_step = self.env_step
+            return True
+        if self._last_logged_step < 0 or (self.env_step - self._last_logged_step) >= interval:
+            self._last_logged_step = self.env_step
+            return True
+        return False
 
     def _init_wandb(self) -> None:
         if wandb is None or not self.wandb_config:
