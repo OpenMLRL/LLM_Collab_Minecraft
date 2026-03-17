@@ -4,6 +4,7 @@ import json
 import math
 import os
 import random
+import copy
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union
@@ -19,7 +20,7 @@ try:
 except Exception:  # pragma: no cover
     wandb = None
 
-from LLM_Collab_Minecraft.bridge_build_meta.adapters import BridgeBuildAdapter
+from LLM_Collab_Minecraft.bridge_build_meta.adapters import AgentActionCandidates, BridgeBuildAdapter
 from LLM_Collab_Minecraft.bridge_build_meta.models import (
     BeliefEncoder,
     CausalLMWithContextValueHead,
@@ -116,6 +117,7 @@ class TurnRecord:
     attention_masks: List[torch.Tensor]
     prompt_lens: List[int]
     response_lens: List[int]
+    action_traces: List[List["ActionChoiceTrace"]]
     meta_obs: List[Any]
     reward: float
     metrics: Dict[str, Any]
@@ -127,6 +129,14 @@ class TurnRecord:
 class EpisodeTrajectory:
     task_id: str
     turns: List[TurnRecord] = field(default_factory=list)
+
+
+@dataclass
+class ActionChoiceTrace:
+    field_name: str
+    response_prefix: str
+    candidate_texts: List[str]
+    chosen_index: int
 
 
 class BCMAACTrainer:
@@ -310,6 +320,7 @@ class BCMAACTrainer:
                 prompt_history[agent_idx].append(prompt)
 
             meta_obs = self.adapter.build_meta_observations(payload)
+            action_candidates = self.adapter.build_action_candidates(payload)
             contexts: List[torch.Tensor] = []
             with torch.no_grad():
                 for agent_idx in range(self.args.num_agents):
@@ -326,12 +337,14 @@ class BCMAACTrainer:
             prompt_lens: List[int] = []
             response_lens: List[int] = []
             completions: List[str] = []
+            action_traces: List[List[ActionChoiceTrace]] = []
             for agent_idx in range(self.args.num_agents):
-                gen = self._sample_completion(
+                gen = self._sample_constrained_action(
                     model=self.agents[agent_idx],
                     tokenizer=self.agent_tokenizers[agent_idx],
                     prompt=prompts[agent_idx],
                     context_vec=contexts[agent_idx],
+                    action_candidates=action_candidates[agent_idx],
                     training=training,
                 )
                 sequences.append(gen["sequence"].cpu())
@@ -339,6 +352,7 @@ class BCMAACTrainer:
                 prompt_lens.append(int(gen["prompt_len"]))
                 response_lens.append(int(gen["response_len"]))
                 completions.append(str(gen["completion"]))
+                action_traces.append(list(gen["action_traces"]))
 
             next_payload, metrics, _actions = self.adapter.transition(payload, completions)
             reward = float(self.reward_processor(float(metrics.get("reward", 0.0))))
@@ -358,6 +372,7 @@ class BCMAACTrainer:
                     attention_masks=attention_masks,
                     prompt_lens=prompt_lens,
                     response_lens=response_lens,
+                    action_traces=action_traces,
                     meta_obs=meta_obs,
                     reward=reward,
                     metrics=dict(metrics),
@@ -446,16 +461,12 @@ class BCMAACTrainer:
                 num_actor_terms = max(1, self.args.num_agents)
                 for agent_idx in range(self.args.num_agents):
                     actor_device = self.agent_devices[agent_idx]
-                    sequence = turn.sequences[agent_idx].unsqueeze(0).to(actor_device)
-                    attention_mask = turn.attention_masks[agent_idx].unsqueeze(0).to(actor_device)
-                    prompt_len = int(turn.prompt_lens[agent_idx])
-                    response_len = int(turn.response_lens[agent_idx])
+                    prompt_tokens = turn.sequences[agent_idx][: int(turn.prompt_lens[agent_idx])].unsqueeze(0).to(actor_device)
                     logprob, entropy = self._sequence_logprob(
                         model=self.agents[agent_idx],
-                        sequences=sequence,
-                        attention_mask=attention_mask,
-                        prompt_len=prompt_len,
-                        response_len=response_len,
+                        tokenizer=self.agent_tokenizers[agent_idx],
+                        prompt_tokens=prompt_tokens,
+                        action_traces=turn.action_traces[agent_idx],
                         context_vec=contexts[agent_idx],
                     )
                     adv_tensor = torch.tensor([adv_value], device=actor_device, dtype=logprob.dtype)
@@ -642,6 +653,75 @@ class BCMAACTrainer:
             "completion": completion,
         }
 
+    def _sample_constrained_action(
+        self,
+        *,
+        model: CausalLMWithContextValueHead,
+        tokenizer: Any,
+        prompt: str,
+        context_vec: torch.Tensor,
+        action_candidates: AgentActionCandidates,
+        training: bool,
+    ) -> Dict[str, Any]:
+        candidate_values: Dict[str, Sequence[Any]] = {
+            "comm": list(action_candidates.comm_options or [{}]),
+            "probe": list(action_candidates.probe_options or [[]]),
+            "cmds": list(action_candidates.cmd_options or [[]]),
+            "path": list(action_candidates.path_options or [[]]),
+        }
+        response_budget = self._serialize_action_json(
+            {
+                field_name: self._select_longest_json_value(values)
+                for field_name, values in candidate_values.items()
+            }
+        )
+        prompt_input_ids = self._prepare_prompt_input_ids(
+            model=model,
+            tokenizer=tokenizer,
+            prompt=prompt,
+            response_budget=response_budget,
+        )
+        context_vec = context_vec.to(self._module_device(model))
+        selected_values: Dict[str, Any] = {}
+        choice_traces: List[ActionChoiceTrace] = []
+        field_order = ("comm", "probe", "cmds", "path")
+        for field_name in field_order:
+            response_prefix = self._build_action_prefix(selected_values, field_name=field_name)
+            candidate_texts = [
+                self._serialize_json_value(value)
+                for value in (candidate_values.get(field_name) or [self._default_action_value(field_name)])
+            ]
+            scores = self._score_constrained_candidates(
+                model=model,
+                tokenizer=tokenizer,
+                prompt_input_ids=prompt_input_ids,
+                response_prefix=response_prefix,
+                candidate_texts=candidate_texts,
+                context_vec=context_vec,
+            )
+            chosen_index = self._select_candidate_index(scores=scores, training=training)
+            selected_values[field_name] = (candidate_values[field_name] or [self._default_action_value(field_name)])[chosen_index]
+            choice_traces.append(
+                ActionChoiceTrace(
+                    field_name=field_name,
+                    response_prefix=response_prefix,
+                    candidate_texts=list(candidate_texts),
+                    chosen_index=int(chosen_index),
+                )
+            )
+
+        completion = self._serialize_action_json(selected_values)
+        return {
+            "completion": completion,
+            "action_traces": choice_traces,
+            **self._encode_prompt_completion(
+                tokenizer=tokenizer,
+                prompt_input_ids=prompt_input_ids,
+                completion=completion,
+                device=self._module_device(model),
+            ),
+        }
+
     def _completion_has_action_json(self, text: str) -> bool:
         raw = str(text or "")
         if not raw:
@@ -717,28 +797,205 @@ class BCMAACTrainer:
         self,
         *,
         model: CausalLMWithContextValueHead,
-        sequences: torch.Tensor,
-        attention_mask: torch.Tensor,
-        prompt_len: int,
-        response_len: int,
+        tokenizer: Any,
+        prompt_tokens: torch.Tensor,
+        action_traces: Sequence[ActionChoiceTrace],
         context_vec: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
+        if not action_traces:
+            zero = torch.zeros(1, device=prompt_tokens.device, dtype=torch.float32)
+            return zero, zero
         model_device = self._module_device(model)
-        sequences = sequences.to(model_device)
-        attention_mask = attention_mask.to(model_device)
+        prompt_tokens = prompt_tokens.to(model_device)
         context_vec = context_vec.to(model_device)
-        context_mask = torch.full_like(
-            sequences,
+        choice_log_probs: List[torch.Tensor] = []
+        entropy_terms: List[torch.Tensor] = []
+        for trace in action_traces:
+            scores = self._score_constrained_candidates(
+                model=model,
+                tokenizer=tokenizer,
+                prompt_input_ids=prompt_tokens,
+                response_prefix=trace.response_prefix,
+                candidate_texts=trace.candidate_texts,
+                context_vec=context_vec,
+            )
+            scaled_scores = scores / max(float(self.args.temperature), 1e-6)
+            log_probs = F.log_softmax(scaled_scores, dim=-1)
+            probs = log_probs.exp()
+            choice_log_probs.append(log_probs[int(trace.chosen_index)])
+            entropy_terms.append(-(probs * log_probs).sum())
+        return torch.stack(choice_log_probs).sum().view(1), torch.stack(entropy_terms).mean().view(1)
+
+    def _prepare_prompt_input_ids(
+        self,
+        *,
+        model: CausalLMWithContextValueHead,
+        tokenizer: Any,
+        prompt: str,
+        response_budget: str,
+    ) -> torch.Tensor:
+        model_device = self._module_device(model)
+        max_ctx = self._max_context_length(model.model, tokenizer)
+        suffix_ids = tokenizer(
+            response_budget,
+            return_tensors="pt",
+            add_special_tokens=False,
+        )["input_ids"]
+        prompt_budget = max(1, max_ctx - int(suffix_ids.size(1)))
+        encoded = tokenizer(
+            prompt,
+            return_tensors="pt",
+            truncation=True,
+            max_length=prompt_budget,
+            add_special_tokens=False,
+        )
+        return encoded["input_ids"].to(model_device)
+
+    def _encode_prompt_completion(
+        self,
+        *,
+        tokenizer: Any,
+        prompt_input_ids: torch.Tensor,
+        completion: str,
+        device: torch.device,
+    ) -> Dict[str, Any]:
+        completion_ids = tokenizer(
+            completion,
+            return_tensors="pt",
+            add_special_tokens=False,
+        )["input_ids"].to(device)
+        if completion_ids.numel() == 0:
+            pad_id = getattr(tokenizer, "pad_token_id", None)
+            if pad_id is None:
+                pad_id = getattr(tokenizer, "eos_token_id", 0) or 0
+            completion_ids = torch.tensor([[int(pad_id)]], dtype=prompt_input_ids.dtype, device=device)
+        full_sequence = torch.cat([prompt_input_ids, completion_ids], dim=1)
+        full_attention_mask = torch.ones_like(full_sequence, device=device)
+        return {
+            "sequence": full_sequence.squeeze(0),
+            "attention_mask": full_attention_mask.squeeze(0),
+            "prompt_len": int(prompt_input_ids.size(1)),
+            "response_len": int(completion_ids.size(1)),
+        }
+
+    def _serialize_action_json(self, values: Mapping[str, Any]) -> str:
+        ordered = {
+            "comm": copy.deepcopy(values.get("comm", {})),
+            "probe": copy.deepcopy(values.get("probe", [])),
+            "cmds": copy.deepcopy(values.get("cmds", [])),
+            "path": copy.deepcopy(values.get("path", [])),
+        }
+        return json.dumps(ordered, ensure_ascii=False, separators=(",", ":"))
+
+    def _build_action_prefix(self, selected_values: Mapping[str, Any], *, field_name: str) -> str:
+        prefix_parts: List[str] = ["{"]
+        ordered_fields = ("comm", "probe", "cmds", "path")
+        first = True
+        for name in ordered_fields:
+            if name == field_name:
+                if not first:
+                    prefix_parts.append(",")
+                prefix_parts.append(json.dumps(name, ensure_ascii=False))
+                prefix_parts.append(":")
+                break
+            if name not in selected_values:
+                break
+            if not first:
+                prefix_parts.append(",")
+            prefix_parts.append(json.dumps(name, ensure_ascii=False))
+            prefix_parts.append(":")
+            prefix_parts.append(self._serialize_json_value(selected_values[name]))
+            first = False
+        return "".join(prefix_parts)
+
+    def _serialize_json_value(self, value: Any) -> str:
+        return json.dumps(copy.deepcopy(value), ensure_ascii=False, separators=(",", ":"))
+
+    def _select_longest_json_value(self, values: Sequence[Any]) -> Any:
+        if not values:
+            return {}
+        return max(values, key=lambda item: len(self._serialize_json_value(item)))
+
+    def _default_action_value(self, field_name: str) -> Any:
+        if field_name == "comm":
+            return {}
+        return []
+
+    def _score_constrained_candidates(
+        self,
+        *,
+        model: CausalLMWithContextValueHead,
+        tokenizer: Any,
+        prompt_input_ids: torch.Tensor,
+        response_prefix: str,
+        candidate_texts: Sequence[str],
+        context_vec: torch.Tensor,
+    ) -> torch.Tensor:
+        if not candidate_texts:
+            return torch.zeros(1, device=prompt_input_ids.device, dtype=torch.float32)
+        model_device = self._module_device(model)
+        prompt_input_ids = prompt_input_ids.to(model_device)
+        context_vec = context_vec.to(model_device)
+        if tokenizer is None:
+            raise ValueError("tokenizer is required for constrained scoring.")
+        prefix_ids = tokenizer(
+            response_prefix,
+            return_tensors="pt",
+            add_special_tokens=False,
+        )["input_ids"].to(model_device)
+        candidate_id_list: List[torch.Tensor] = []
+        for text in candidate_texts:
+            candidate_ids = tokenizer(
+                str(text),
+                return_tensors="pt",
+                add_special_tokens=False,
+            )["input_ids"].to(model_device)
+            if candidate_ids.numel() == 0:
+                pad_id = getattr(tokenizer, "pad_token_id", None)
+                if pad_id is None:
+                    pad_id = getattr(tokenizer, "eos_token_id", 0) or 0
+                candidate_ids = torch.tensor([[int(pad_id)]], dtype=prompt_input_ids.dtype, device=model_device)
+            candidate_id_list.append(candidate_ids)
+
+        prompt_len = int(prompt_input_ids.size(1))
+        prefix_len = int(prefix_ids.size(1))
+        max_len = max(prompt_len + prefix_len + int(ids.size(1)) for ids in candidate_id_list)
+        pad_id = getattr(tokenizer, "pad_token_id", None)
+        if pad_id is None:
+            pad_id = getattr(tokenizer, "eos_token_id", 0) or 0
+        batch_size = len(candidate_id_list)
+        sequences = torch.full(
+            (batch_size, max_len),
+            int(pad_id),
+            dtype=prompt_input_ids.dtype,
+            device=model_device,
+        )
+        attention_mask = torch.zeros((batch_size, max_len), dtype=torch.long, device=model_device)
+        candidate_mask = torch.zeros((batch_size, max_len - 1), dtype=torch.float32, device=model_device)
+
+        for row, candidate_ids in enumerate(candidate_id_list):
+            full_ids = torch.cat([prompt_input_ids, prefix_ids, candidate_ids], dim=1)
+            seq_len = int(full_ids.size(1))
+            sequences[row, :seq_len] = full_ids.squeeze(0)
+            attention_mask[row, :seq_len] = 1
+            candidate_len = int(candidate_ids.size(1))
+            start_idx = max(prompt_len + prefix_len - 1, 0)
+            end_idx = start_idx + candidate_len
+            candidate_mask[row, start_idx:end_idx] = 1.0
+
+        context_mask = torch.full(
+            (batch_size, max_len),
             float(self.args.actor_response_context_scale),
             dtype=torch.float32,
             device=model_device,
         )
         if prompt_len > 0:
             context_mask[:, :prompt_len] = float(self.args.actor_prompt_context_scale)
+
         outputs = model(
             input_ids=sequences,
             attention_mask=attention_mask,
-            context_vec=context_vec,
+            context_vec=context_vec.expand(batch_size, -1),
             context_mask=context_mask,
             output_values=False,
         )
@@ -746,20 +1003,18 @@ class BCMAACTrainer:
         shifted_targets = sequences[:, 1:]
         log_probs = F.log_softmax(shifted_logits, dim=-1)
         token_log_probs = log_probs.gather(dim=-1, index=shifted_targets.unsqueeze(-1)).squeeze(-1)
-        start_index = max(prompt_len - 1, 0)
-        end_index = start_index + response_len
-        response_log_probs = token_log_probs[:, start_index:end_index]
-        if float(self.args.entropy_coef) != 0.0:
-            token_entropy = -(log_probs.exp() * log_probs).sum(dim=-1)
-            response_entropy = token_entropy[:, start_index:end_index]
-            entropy = response_entropy.mean(dim=-1)
-        else:
-            entropy = torch.zeros(
-                sequences.size(0),
-                device=sequences.device,
-                dtype=response_log_probs.dtype,
-            )
-        return response_log_probs.sum(dim=-1), entropy
+        masked_log_probs = token_log_probs * candidate_mask
+        denom = candidate_mask.sum(dim=-1).clamp(min=1.0)
+        return masked_log_probs.sum(dim=-1) / denom
+
+    def _select_candidate_index(self, *, scores: torch.Tensor, training: bool) -> int:
+        if scores.numel() <= 1:
+            return 0
+        if not training:
+            return int(torch.argmax(scores).item())
+        scaled_scores = scores / max(float(self.args.temperature), 1e-6)
+        probs = torch.softmax(scaled_scores, dim=-1)
+        return int(torch.multinomial(probs, num_samples=1).item())
 
     def _critic_value_from_text(self, prompt: str, joint_context: torch.Tensor) -> torch.Tensor:
         max_ctx = self._max_context_length(self.critic.model, self.critic_tokenizer)

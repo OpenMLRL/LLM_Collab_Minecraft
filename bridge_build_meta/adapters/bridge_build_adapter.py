@@ -37,6 +37,14 @@ class AgentMetaObservation:
     turn_index: int
 
 
+@dataclass
+class AgentActionCandidates:
+    comm_options: List[Dict[str, Any]]
+    probe_options: List[List[List[int]]]
+    cmd_options: List[List[str]]
+    path_options: List[List[List[int]]]
+
+
 class BridgeBuildAdapter:
     """Task adapter that exposes bridge_build as a structured belief-learning problem."""
 
@@ -276,6 +284,59 @@ class BridgeBuildAdapter:
         left, right = contexts[0], contexts[1]
         return torch.cat([left, right, left * right], dim=-1)
 
+    def build_action_candidates(self, payload: Mapping[str, Any]) -> List[AgentActionCandidates]:
+        task = payload_to_task(payload)
+        state = payload_to_state(payload)
+        allowed = payload_allowed_blocks(payload, num_agents=self.num_agents)
+        limits = split_command_limits(
+            max_commands_total=int(payload.get("max_commands_total") or self.max_commands_total),
+            num_agents=self.num_agents,
+        )
+        outputs: List[AgentActionCandidates] = []
+        for agent_idx in range(self.num_agents):
+            obs = get_agent_observation(task, state, agent_idx=agent_idx, view=self.view)
+            visible = compute_visible_cells(
+                state.vision_origins[agent_idx],
+                view=self.view,
+                width=task.width,
+                height=task.height,
+            )
+            unknown_visible = self._visible_unknown_candidates(
+                task=task,
+                state=state,
+                agent_idx=agent_idx,
+                visible=visible,
+            )
+            outputs.append(
+                AgentActionCandidates(
+                    comm_options=self._build_comm_options(
+                        obs=obs,
+                        unknown_visible=unknown_visible,
+                    ),
+                    probe_options=self._build_probe_options(
+                        obs=obs,
+                        unknown_visible=unknown_visible,
+                    ),
+                    cmd_options=self._build_cmd_options(
+                        task=task,
+                        state=state,
+                        agent_idx=agent_idx,
+                        visible=visible,
+                        allowed_blocks=allowed[agent_idx],
+                        max_commands=int(limits[agent_idx]),
+                        obs=obs,
+                    ),
+                    path_options=self._build_path_options(
+                        task=task,
+                        state=state,
+                        agent_idx=agent_idx,
+                        unknown_visible=unknown_visible,
+                        obs=obs,
+                    ),
+                )
+            )
+        return outputs
+
     def debug_turn(
         self,
         *,
@@ -299,6 +360,296 @@ class BridgeBuildAdapter:
             metrics=metrics,
             agent_outputs=list(agent_outputs),
         )
+
+    def _coord_list(self, coord: Coord) -> List[int]:
+        return [int(coord[0]), int(coord[1])]
+
+    def _dedupe_jsonable_options(self, options: Sequence[Any]) -> List[Any]:
+        seen: set[str] = set()
+        out: List[Any] = []
+        for item in options:
+            key = str(item)
+            try:
+                import json
+
+                key = json.dumps(item, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            except Exception:
+                key = str(item)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(copy.deepcopy(item))
+        return out
+
+    def _neighbors4(self, coord: Coord) -> List[Coord]:
+        x, z = int(coord[0]), int(coord[1])
+        return [(x - 1, z), (x + 1, z), (x, z - 1), (x, z + 1)]
+
+    def _in_bounds(self, coord: Coord, *, task: Any) -> bool:
+        return 0 <= int(coord[0]) < int(task.width) and 0 <= int(coord[1]) < int(task.height)
+
+    def _agent_goal_hints(self, *, task: Any, obs: Mapping[str, Any], agent_idx: int) -> List[Coord]:
+        target_kind = "T" if int(agent_idx) == 0 else "S"
+        visible_anchors = obs.get("visible_anchors") or []
+        out: List[Coord] = []
+        for item in visible_anchors:
+            if not isinstance(item, Mapping):
+                continue
+            if str(item.get("kind") or "") != target_kind:
+                continue
+            coord = item.get("coord")
+            if not isinstance(coord, (list, tuple)) or len(coord) < 2:
+                continue
+            out.append((int(coord[0]), int(coord[1])))
+        if out:
+            return out
+        if int(agent_idx) == 0:
+            return [(int(task.width) - 1, int(task.height) - 1)]
+        return [(0, 0)]
+
+    def _visible_unknown_candidates(
+        self,
+        *,
+        task: Any,
+        state: Any,
+        agent_idx: int,
+        visible: Iterable[Coord],
+    ) -> List[Coord]:
+        visible_set = {(int(x), int(z)) for x, z in visible}
+        known = {(int(x), int(z)) for x, z in state.known_pillars[agent_idx].keys()}
+        coords = [
+            (int(x), int(z))
+            for x, z in task.candidate_pillars
+            if (int(x), int(z)) in visible_set and (int(x), int(z)) not in known
+        ]
+        return list(sorted(coords))
+
+    def _build_comm_options(
+        self,
+        *,
+        obs: Mapping[str, Any],
+        unknown_visible: Sequence[Coord],
+    ) -> List[Dict[str, Any]]:
+        known_items = obs.get("known_probe_results") or []
+        discovered: List[Dict[str, Any]] = []
+        for item in known_items:
+            if not isinstance(item, Mapping):
+                continue
+            coord = item.get("coord")
+            if not isinstance(coord, (list, tuple)) or len(coord) < 2:
+                continue
+            discovered.append(
+                {
+                    "x": int(coord[0]),
+                    "z": int(coord[1]),
+                    "type": str(item.get("type") or ""),
+                    "source": "self_probe",
+                }
+            )
+        candidate_coords = [self._coord_list(coord) for coord in list(unknown_visible)[:8]]
+        options: List[Dict[str, Any]] = [{}]
+        if discovered:
+            options.append({"discovered_pillars": discovered})
+        if discovered or candidate_coords:
+            options.append(
+                {
+                    "discovered_pillars": discovered,
+                    "candidate_coords": candidate_coords,
+                }
+            )
+        return self._dedupe_jsonable_options(options)
+
+    def _rank_coords(
+        self,
+        *,
+        coords: Sequence[Coord],
+        origin: Coord,
+        targets: Sequence[Coord],
+    ) -> List[Coord]:
+        def _score(coord: Coord) -> Tuple[int, int, int, int]:
+            dist_origin = abs(int(coord[0]) - int(origin[0])) + abs(int(coord[1]) - int(origin[1]))
+            dist_target = self._min_manhattan_distance(origin=coord, targets=targets)
+            return (dist_target, dist_origin, int(coord[1]), int(coord[0]))
+
+        return list(sorted(((int(x), int(z)) for x, z in coords), key=_score))
+
+    def _build_probe_options(
+        self,
+        *,
+        obs: Mapping[str, Any],
+        unknown_visible: Sequence[Coord],
+    ) -> List[List[List[int]]]:
+        current_pos = obs.get("current_pos") or [0, 0]
+        origin = (int(current_pos[0]), int(current_pos[1]))
+        ranked = self._rank_coords(coords=unknown_visible, origin=origin, targets=[origin])
+        options: List[List[List[int]]] = [[]]
+        capped = ranked[: max(0, self.max_probe)]
+        for count in range(1, min(self.max_probe, len(capped)) + 1):
+            options.append([self._coord_list(coord) for coord in capped[:count]])
+        return self._dedupe_jsonable_options(options)
+
+    def _greedy_path(
+        self,
+        *,
+        start: Coord,
+        target: Coord,
+        task: Any,
+        max_steps: int,
+    ) -> List[List[int]]:
+        cur = (int(start[0]), int(start[1]))
+        goal = (int(target[0]), int(target[1]))
+        path: List[List[int]] = [self._coord_list(cur)]
+        for _ in range(max(0, int(max_steps))):
+            if cur == goal:
+                break
+            dx = int(goal[0]) - int(cur[0])
+            dz = int(goal[1]) - int(cur[1])
+            step = (
+                int(cur[0] + (1 if dx > 0 else -1 if dx < 0 else 0)),
+                int(cur[1] + (1 if dz > 0 else -1 if dz < 0 else 0)),
+            )
+            if not self._in_bounds(step, task=task):
+                break
+            cur = step
+            path.append(self._coord_list(cur))
+        return path
+
+    def _build_path_options(
+        self,
+        *,
+        task: Any,
+        state: Any,
+        agent_idx: int,
+        unknown_visible: Sequence[Coord],
+        obs: Mapping[str, Any],
+    ) -> List[List[List[int]]]:
+        current_pos = (int(state.agent_positions[agent_idx][0]), int(state.agent_positions[agent_idx][1]))
+        options: List[List[List[int]]] = [[self._coord_list(current_pos)]]
+        goal_hints = self._agent_goal_hints(task=task, obs=obs, agent_idx=agent_idx)
+        if goal_hints:
+            options.append(
+                self._greedy_path(
+                    start=current_pos,
+                    target=goal_hints[0],
+                    task=task,
+                    max_steps=max(1, min(5, int(self.view) + 2)),
+                )
+            )
+        if unknown_visible:
+            ranked_unknown = self._rank_coords(coords=unknown_visible, origin=current_pos, targets=goal_hints or [current_pos])
+            options.append(
+                self._greedy_path(
+                    start=current_pos,
+                    target=ranked_unknown[0],
+                    task=task,
+                    max_steps=max(1, min(5, int(self.view) + 2)),
+                )
+            )
+        return self._dedupe_jsonable_options(options)
+
+    def _format_fill_command(self, *, start: Coord, end: Coord, block: str) -> str:
+        x1, z1 = int(start[0]), int(start[1])
+        x2, z2 = int(end[0]), int(end[1])
+        return f"/fill {min(x1, x2)} {min(z1, z2)} {max(x1, x2)} {max(z1, z2)} {block}"
+
+    def _extend_line_command(
+        self,
+        *,
+        seed: Coord,
+        targets: Sequence[Coord],
+        placeable: set[Coord],
+        block: str,
+    ) -> Optional[str]:
+        if not targets:
+            return None
+        target = targets[0]
+        dx = int(target[0]) - int(seed[0])
+        dz = int(target[1]) - int(seed[1])
+        axes: List[Coord] = []
+        if abs(dx) >= abs(dz) and dx != 0:
+            axes.append((1 if dx > 0 else -1, 0))
+        if dz != 0:
+            axes.append((0, 1 if dz > 0 else -1))
+        if not axes and dx != 0:
+            axes.append((1 if dx > 0 else -1, 0))
+        for step_x, step_z in axes:
+            end = seed
+            for _ in range(2):
+                nxt = (int(end[0]) + int(step_x), int(end[1]) + int(step_z))
+                if nxt not in placeable:
+                    break
+                end = nxt
+            if end != seed:
+                return self._format_fill_command(start=seed, end=end, block=block)
+        return None
+
+    def _build_cmd_options(
+        self,
+        *,
+        task: Any,
+        state: Any,
+        agent_idx: int,
+        visible: Iterable[Coord],
+        allowed_blocks: Sequence[str],
+        max_commands: int,
+        obs: Mapping[str, Any],
+    ) -> List[List[str]]:
+        if max_commands <= 0:
+            return [[]]
+        block = str((list(allowed_blocks) or ["oak_planks"])[0])
+        visible_set = {(int(x), int(z)) for x, z in visible}
+        immutable = {(int(x), int(z)) for x, z in task.land_cells} | {
+            (int(x), int(z)) for x, z in task.candidate_pillars
+        }
+        placeable = {coord for coord in visible_set if coord not in immutable}
+        if not placeable:
+            return [[]]
+
+        current_pos = (int(state.agent_positions[agent_idx][0]), int(state.agent_positions[agent_idx][1]))
+        goal_hints = self._agent_goal_hints(task=task, obs=obs, agent_idx=agent_idx)
+        visible_anchors = {
+            (int(item["coord"][0]), int(item["coord"][1]))
+            for item in (obs.get("visible_anchors") or [])
+            if isinstance(item, Mapping) and isinstance(item.get("coord"), (list, tuple)) and len(item.get("coord")) >= 2
+        }
+        visible_filled = {
+            (int(x), int(z)) for x, z in [tuple(coord) for coord in (obs.get("visible_filled_coords") or []) if len(coord) >= 2]
+        }
+        known_true = {
+            (int(item["coord"][0]), int(item["coord"][1]))
+            for item in (obs.get("known_probe_results") or [])
+            if isinstance(item, Mapping)
+            and str(item.get("type") or "") == "Y"
+            and isinstance(item.get("coord"), (list, tuple))
+            and len(item.get("coord")) >= 2
+        }
+        focus = set([current_pos]) | visible_anchors | visible_filled | known_true
+
+        def _seed_score(cell: Coord) -> Tuple[float, int, int]:
+            adj_focus = sum(1 for nb in self._neighbors4(cell) if nb in focus)
+            dist_goal = self._min_manhattan_distance(origin=cell, targets=goal_hints or [current_pos])
+            dist_cur = abs(int(cell[0]) - int(current_pos[0])) + abs(int(cell[1]) - int(current_pos[1]))
+            return (-(3.0 * float(adj_focus) - 0.35 * float(dist_goal) - 0.15 * float(dist_cur)), int(cell[1]), int(cell[0]))
+
+        ranked = list(sorted(placeable, key=_seed_score))
+        command_pool: List[str] = []
+        for seed in ranked[:6]:
+            command_pool.append(self._format_fill_command(start=seed, end=seed, block=block))
+            line_cmd = self._extend_line_command(
+                seed=seed,
+                targets=goal_hints or [current_pos],
+                placeable=placeable,
+                block=block,
+            )
+            if line_cmd is not None:
+                command_pool.append(line_cmd)
+        command_pool = self._dedupe_jsonable_options(command_pool)
+        options: List[List[str]] = [[]]
+        for cmd in command_pool[: min(3, len(command_pool))]:
+            options.append([str(cmd)])
+        if max_commands >= 2 and len(command_pool) >= 2:
+            options.append([str(command_pool[0]), str(command_pool[1])])
+        return self._dedupe_jsonable_options(options)
 
     def _render_prompt(self, *, system_prompt: str, user_prompt: str) -> str:
         tokenizer = self.tokenizer
