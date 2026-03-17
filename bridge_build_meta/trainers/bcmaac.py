@@ -87,6 +87,7 @@ class BCMAACConfig:
     critic_condition_dim: Optional[int] = None
     actor_prompt_context_scale: float = 1.0
     actor_response_context_scale: float = 0.15
+    score_chunk_size: int = 0
 
     def __post_init__(self) -> None:
         if self.num_agents < 1:
@@ -107,6 +108,8 @@ class BCMAACConfig:
             raise ValueError("actor_prompt_context_scale must be >= 0.")
         if self.actor_response_context_scale < 0.0:
             raise ValueError("actor_response_context_scale must be >= 0.")
+        if self.score_chunk_size < 0:
+            raise ValueError("score_chunk_size must be >= 0.")
 
 
 @dataclass
@@ -338,21 +341,22 @@ class BCMAACTrainer:
             response_lens: List[int] = []
             completions: List[str] = []
             action_traces: List[List[ActionChoiceTrace]] = []
-            for agent_idx in range(self.args.num_agents):
-                gen = self._sample_constrained_action(
-                    model=self.agents[agent_idx],
-                    tokenizer=self.agent_tokenizers[agent_idx],
-                    prompt=prompts[agent_idx],
-                    context_vec=contexts[agent_idx],
-                    action_candidates=action_candidates[agent_idx],
-                    training=training,
-                )
-                sequences.append(gen["sequence"].cpu())
-                attention_masks.append(gen["attention_mask"].cpu())
-                prompt_lens.append(int(gen["prompt_len"]))
-                response_lens.append(int(gen["response_len"]))
-                completions.append(str(gen["completion"]))
-                action_traces.append(list(gen["action_traces"]))
+            with torch.no_grad():
+                for agent_idx in range(self.args.num_agents):
+                    gen = self._sample_constrained_action(
+                        model=self.agents[agent_idx],
+                        tokenizer=self.agent_tokenizers[agent_idx],
+                        prompt=prompts[agent_idx],
+                        context_vec=contexts[agent_idx],
+                        action_candidates=action_candidates[agent_idx],
+                        training=training,
+                    )
+                    sequences.append(gen["sequence"].cpu())
+                    attention_masks.append(gen["attention_mask"].cpu())
+                    prompt_lens.append(int(gen["prompt_len"]))
+                    response_lens.append(int(gen["response_len"]))
+                    completions.append(str(gen["completion"]))
+                    action_traces.append(list(gen["action_traces"]))
 
             next_payload, metrics, _actions = self.adapter.transition(payload, completions)
             reward = float(self.reward_processor(float(metrics.get("reward", 0.0))))
@@ -462,22 +466,17 @@ class BCMAACTrainer:
                 for agent_idx in range(self.args.num_agents):
                     actor_device = self.agent_devices[agent_idx]
                     prompt_tokens = turn.sequences[agent_idx][: int(turn.prompt_lens[agent_idx])].unsqueeze(0).to(actor_device)
-                    logprob, entropy = self._sequence_logprob(
+                    actor_loss_value, entropy_value = self._backprop_action_traces(
                         model=self.agents[agent_idx],
                         tokenizer=self.agent_tokenizers[agent_idx],
                         prompt_tokens=prompt_tokens,
                         action_traces=turn.action_traces[agent_idx],
-                        context_vec=contexts[agent_idx],
+                        context_vec=contexts[agent_idx].detach(),
+                        advantage=float(adv_value),
+                        loss_scale=float(total_turns) * float(num_actor_terms),
                     )
-                    adv_tensor = torch.tensor([adv_value], device=actor_device, dtype=logprob.dtype)
-                    actor_loss = -(logprob.squeeze(0) * adv_tensor).mean()
-                    entropy_value = entropy.squeeze(0).mean()
-                    scaled_actor_loss = (
-                        actor_loss - float(self.args.entropy_coef) * entropy_value
-                    ) / (float(total_turns) * float(num_actor_terms))
-                    scaled_actor_loss.backward(retain_graph=True)
-                    actor_turn_loss_values.append(float(actor_loss.detach().item()))
-                    entropy_turn_values.append(float(entropy_value.detach().item()))
+                    actor_turn_loss_values.append(float(actor_loss_value))
+                    entropy_turn_values.append(float(entropy_value))
 
                 belief_loss_turn = (
                     torch.stack(turn_belief_losses).mean()
@@ -793,6 +792,53 @@ class BCMAACTrainer:
             return torch.argmax(probs, dim=-1)
         return torch.multinomial(probs, num_samples=1).squeeze(-1)
 
+    def _backprop_action_traces(
+        self,
+        *,
+        model: CausalLMWithContextValueHead,
+        tokenizer: Any,
+        prompt_tokens: torch.Tensor,
+        action_traces: Sequence[ActionChoiceTrace],
+        context_vec: torch.Tensor,
+        advantage: float,
+        loss_scale: float,
+    ) -> Tuple[float, float]:
+        if not action_traces:
+            return 0.0, 0.0
+        model_device = self._module_device(model)
+        prompt_tokens = prompt_tokens.to(model_device)
+        context_vec = context_vec.to(model_device).detach()
+        advantage_tensor = torch.tensor(float(advantage), device=model_device, dtype=torch.float32)
+        total_actor_loss = 0.0
+        entropy_values: List[float] = []
+        num_traces = max(1, len(action_traces))
+
+        for trace in action_traces:
+            scores = self._score_constrained_candidates(
+                model=model,
+                tokenizer=tokenizer,
+                prompt_input_ids=prompt_tokens,
+                response_prefix=trace.response_prefix,
+                candidate_texts=trace.candidate_texts,
+                context_vec=context_vec,
+            )
+            scaled_scores = scores / max(float(self.args.temperature), 1e-6)
+            log_probs = F.log_softmax(scaled_scores, dim=-1)
+            probs = log_probs.exp()
+            chosen_logprob = log_probs[int(trace.chosen_index)]
+            trace_entropy = -(probs * log_probs).sum()
+            trace_loss = -(chosen_logprob * advantage_tensor.to(dtype=chosen_logprob.dtype))
+            scaled_trace_loss = (
+                trace_loss
+                - float(self.args.entropy_coef) * (trace_entropy / float(num_traces))
+            ) / max(float(loss_scale), 1.0)
+            scaled_trace_loss.backward()
+            total_actor_loss += float(trace_loss.detach().item())
+            entropy_values.append(float(trace_entropy.detach().item()))
+
+        entropy_mean = float(sum(entropy_values) / len(entropy_values)) if entropy_values else 0.0
+        return total_actor_loss, entropy_mean
+
     def _sequence_logprob(
         self,
         *,
@@ -957,13 +1003,38 @@ class BCMAACTrainer:
                 candidate_ids = torch.tensor([[int(pad_id)]], dtype=prompt_input_ids.dtype, device=model_device)
             candidate_id_list.append(candidate_ids)
 
+        chunk_size = int(self.args.score_chunk_size or 0)
+        if chunk_size <= 0:
+            chunk_size = len(candidate_id_list)
+        chunk_scores: List[torch.Tensor] = []
+        for start in range(0, len(candidate_id_list), chunk_size):
+            chunk_scores.append(
+                self._score_constrained_candidate_chunk(
+                    model=model,
+                    prompt_input_ids=prompt_input_ids,
+                    prefix_ids=prefix_ids,
+                    candidate_id_list=candidate_id_list[start : start + chunk_size],
+                    context_vec=context_vec,
+                    pad_id=int(getattr(tokenizer, "pad_token_id", None) or getattr(tokenizer, "eos_token_id", 0) or 0),
+                )
+            )
+        return torch.cat(chunk_scores, dim=0)
+
+    def _score_constrained_candidate_chunk(
+        self,
+        *,
+        model: CausalLMWithContextValueHead,
+        prompt_input_ids: torch.Tensor,
+        prefix_ids: torch.Tensor,
+        candidate_id_list: Sequence[torch.Tensor],
+        context_vec: torch.Tensor,
+        pad_id: int,
+    ) -> torch.Tensor:
+        model_device = self._module_device(model)
         prompt_len = int(prompt_input_ids.size(1))
         prefix_len = int(prefix_ids.size(1))
+        batch_size = max(1, len(candidate_id_list))
         max_len = max(prompt_len + prefix_len + int(ids.size(1)) for ids in candidate_id_list)
-        pad_id = getattr(tokenizer, "pad_token_id", None)
-        if pad_id is None:
-            pad_id = getattr(tokenizer, "eos_token_id", 0) or 0
-        batch_size = len(candidate_id_list)
         sequences = torch.full(
             (batch_size, max_len),
             int(pad_id),
