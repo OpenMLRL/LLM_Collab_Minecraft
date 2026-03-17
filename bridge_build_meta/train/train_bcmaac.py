@@ -212,6 +212,7 @@ def _build_bcmaac_config(cfg: Dict[str, Any]) -> BCMAACConfig:
         actor_prompt_context_scale=float(meta_cfg.get("actor_prompt_context_scale", 1.0)),
         actor_response_context_scale=float(meta_cfg.get("actor_response_context_scale", 0.15)),
         score_chunk_size=int(meta_cfg.get("score_chunk_size", 0)),
+        actor_gradient_checkpointing=bool(meta_cfg.get("actor_gradient_checkpointing", False)),
     )
 
 

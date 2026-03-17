@@ -82,6 +82,7 @@ meta:
   actor_prompt_context_scale: 1.0
   actor_response_context_scale: 0.15
   score_chunk_size: 1
+  actor_gradient_checkpointing: true
 
 reward_shaping:
   n_adjacent_penalty_scale: 1.5

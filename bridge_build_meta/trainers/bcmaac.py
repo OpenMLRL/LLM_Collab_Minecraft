@@ -88,6 +88,7 @@ class BCMAACConfig:
     actor_prompt_context_scale: float = 1.0
     actor_response_context_scale: float = 0.15
     score_chunk_size: int = 0
+    actor_gradient_checkpointing: bool = False
 
     def __post_init__(self) -> None:
         if self.num_agents < 1:
@@ -1406,6 +1407,10 @@ class BCMAACTrainer:
                     str(source),
                     **self._filter_model_kwargs(self.model_config.get("model_kwargs", {})),
                 )
+            self._maybe_enable_gradient_checkpointing(
+                base,
+                enabled=bool(self.args.actor_gradient_checkpointing),
+            )
             wrapped = CausalLMWithContextValueHead(
                 base_model=base,
                 context_dim=self.args.context_hidden_dim,
@@ -1452,6 +1457,28 @@ class BCMAACTrainer:
             value_head_hidden_dim=self.args.value_head_hidden_dim,
             value_context_dim=self.args.critic_condition_dim,
         )
+
+    def _maybe_enable_gradient_checkpointing(
+        self,
+        model: nn.Module,
+        *,
+        enabled: bool,
+    ) -> None:
+        if not enabled:
+            return
+        if hasattr(model, "gradient_checkpointing_enable"):
+            try:
+                model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+            except TypeError:
+                model.gradient_checkpointing_enable()
+        if hasattr(model, "enable_input_require_grads"):
+            try:
+                model.enable_input_require_grads()
+            except Exception:
+                pass
+        config = getattr(model, "config", None)
+        if config is not None and hasattr(config, "use_cache"):
+            config.use_cache = False
 
     def _filter_model_kwargs(self, cfg: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
         if not isinstance(cfg, Mapping):
