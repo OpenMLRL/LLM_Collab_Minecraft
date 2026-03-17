@@ -57,10 +57,10 @@ bcmaac:
   num_train_epochs: 150
   agent_learning_rate: 2.5e-6
   critic_learning_rate: 2.5e-6
-  rollout_buffer_size: 1
-  train_batch_size: 1
+  rollout_buffer_size: 8
+  train_batch_size: 4
   value_loss_coef: 0.6
-  max_new_tokens: 512
+  max_new_tokens: 160
   discount: 0.9
   eval_interval: 10
   eval_num_samples: 3
@@ -72,12 +72,20 @@ meta:
   context_hidden_dim: 128
   context_cnn_channels: 32
   context_scalar_hidden_dim: 64
-  task_loss_coef: 0.5
-  entropy_coef: 0.0
+  belief_loss_coef: 0.5
+  entropy_coef: 0.01
+  critic_backbone: structured
   max_grad_norm: 1.0
   value_head_hidden_dim: 256
   actor_condition_dim: 128
   critic_condition_dim: 128
+  actor_prompt_context_scale: 1.0
+  actor_response_context_scale: 0.15
+
+reward_shaping:
+  n_adjacent_penalty_scale: 1.5
+  cc_merge_bonus_scale: 0.5
+  move_progress_bonus_total: 2.5
 
 reward_processor:
   enabled: true

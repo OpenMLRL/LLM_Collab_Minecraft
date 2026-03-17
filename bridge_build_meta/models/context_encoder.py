@@ -11,7 +11,7 @@ from torch import nn
 class BeliefEncoderOutput:
     context: torch.Tensor
     hidden: torch.Tensor
-    task_logits: torch.Tensor
+    belief_logits: torch.Tensor
 
 
 class BeliefEncoder(nn.Module):
@@ -23,12 +23,13 @@ class BeliefEncoder(nn.Module):
         grid_channels: int,
         scalar_dim: int,
         hidden_dim: int,
-        task_vocab_size: int,
+        belief_dim: int,
         cnn_channels: int = 32,
         scalar_hidden_dim: int = 64,
     ) -> None:
         super().__init__()
         self.hidden_dim = int(hidden_dim)
+        self.belief_dim = int(belief_dim)
         self.grid_tower = nn.Sequential(
             nn.Conv2d(grid_channels, cnn_channels, kernel_size=3, padding=1),
             nn.ReLU(),
@@ -47,7 +48,12 @@ class BeliefEncoder(nn.Module):
             nn.Tanh(),
         )
         self.gru = nn.GRUCell(hidden_dim, hidden_dim)
-        self.task_head = nn.Linear(hidden_dim, task_vocab_size)
+        self.belief_head = nn.Sequential(
+            nn.LayerNorm(hidden_dim),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, self.belief_dim),
+        )
         self._init_parameters()
 
     def _init_parameters(self) -> None:
@@ -82,9 +88,38 @@ class BeliefEncoder(nn.Module):
                 dtype=fused.dtype,
             )
         next_hidden = self.gru(fused, hidden)
-        task_logits = self.task_head(next_hidden)
+        belief_logits = self.belief_head(next_hidden)
         return BeliefEncoderOutput(
             context=next_hidden,
             hidden=next_hidden,
-            task_logits=task_logits,
+            belief_logits=belief_logits,
         )
+
+
+class StructuredValueCritic(nn.Module):
+    """Simple centralized critic over the structured joint belief latent."""
+
+    def __init__(self, input_dim: int, hidden_dim: Optional[int] = None) -> None:
+        super().__init__()
+        width = int(hidden_dim or max(128, input_dim))
+        self.net = nn.Sequential(
+            nn.LayerNorm(input_dim),
+            nn.Linear(input_dim, width),
+            nn.GELU(),
+            nn.Linear(width, width),
+            nn.GELU(),
+            nn.Linear(width, 1),
+        )
+        self._init_parameters()
+
+    def _init_parameters(self) -> None:
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
+
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        if inputs.dim() == 1:
+            inputs = inputs.unsqueeze(0)
+        return self.net(inputs).squeeze(-1)

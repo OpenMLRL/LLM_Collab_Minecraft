@@ -30,6 +30,8 @@ Coord = Tuple[int, int]
 class AgentMetaObservation:
     grid: torch.Tensor
     scalars: torch.Tensor
+    belief_target: torch.Tensor
+    belief_mask: torch.Tensor
     task_index: int
     task_id: str
     turn_index: int
@@ -59,11 +61,13 @@ class BridgeBuildAdapter:
         prompt_ctx: Dict[str, Any],
         num_agents: int,
         task_ids: Sequence[str],
+        task_specs: Optional[Sequence[Any]] = None,
         tokenizer: Any | None = None,
         external_mode: str = "empty_feedback",
         original_prompt: bool = True,
         previous_response: bool = False,
         debug: bool = False,
+        reward_config: Optional[Mapping[str, Any]] = None,
     ) -> None:
         self.prompt_ctx = dict(prompt_ctx)
         self.num_agents = int(num_agents)
@@ -76,6 +80,13 @@ class BridgeBuildAdapter:
         self.max_probe = int(self.prompt_ctx["max_probe"])
         self.view = int(self.prompt_ctx["view"])
         self.max_commands_total = int(self.prompt_ctx["max_commands_total"])
+        task_specs = list(task_specs or [])
+        self.max_width = max((int(task.width) for task in task_specs), default=1)
+        self.max_height = max((int(task.height) for task in task_specs), default=1)
+        reward_cfg = dict(reward_config or {})
+        self.n_adjacent_penalty_scale = float(reward_cfg.get("n_adjacent_penalty_scale", 1.5))
+        self.cc_merge_bonus_scale = float(reward_cfg.get("cc_merge_bonus_scale", 0.5))
+        self.move_progress_bonus_total = float(reward_cfg.get("move_progress_bonus_total", 2.5))
 
     @property
     def grid_channels(self) -> int:
@@ -89,6 +100,10 @@ class BridgeBuildAdapter:
     def task_vocab_size(self) -> int:
         return len(self.task_id_to_index)
 
+    @property
+    def belief_dim(self) -> int:
+        return int(self.max_width * self.max_height)
+
     def item_to_payload(self, item: Mapping[str, Any]) -> Dict[str, Any]:
         task = task_from_item(item)
         raw_state = item.get("_bridge_state_before_turn")
@@ -96,7 +111,7 @@ class BridgeBuildAdapter:
             state = deserialize_state(raw_state, num_agents=self.num_agents)
         else:
             state = make_initial_state(task, num_agents=self.num_agents, max_turns=task.max_turns)
-        return build_payload(
+        payload = build_payload(
             task=task,
             state_before_turn=state,
             num_agents=self.num_agents,
@@ -110,6 +125,12 @@ class BridgeBuildAdapter:
             user_template_agent1=str(self.prompt_ctx["user_template_agent1"]),
             user_template_agent2=str(self.prompt_ctx["user_template_agent2"]),
         )
+        payload["reward_state"] = {
+            "move_distance_norm": float(
+                max(1.0, self._movement_distance_total(task=task, state=state))
+            ),
+        }
+        return payload
 
     def reset_item_state(self, item: Mapping[str, Any]) -> Dict[str, Any]:
         return self.item_to_payload(item)
@@ -119,11 +140,27 @@ class BridgeBuildAdapter:
         payload: Mapping[str, Any],
         agent_completions: Sequence[str],
     ) -> Tuple[Dict[str, Any], Dict[str, Any], List[Any]]:
-        return transition_payload(
+        task = payload_to_task(payload)
+        prev_state = payload_to_state(payload)
+        next_payload, metrics, actions = transition_payload(
             payload=payload,
             agent_completions=list(agent_completions),
             num_agents=self.num_agents,
         )
+        reward_state = payload.get("reward_state") or {}
+        move_distance_norm = float(reward_state.get("move_distance_norm", 0.0))
+        if move_distance_norm <= 0.0:
+            move_distance_norm = float(max(1.0, self._movement_distance_total(task=task, state=prev_state)))
+        next_payload["reward_state"] = {"move_distance_norm": move_distance_norm}
+        next_state = payload_to_state(next_payload)
+        adjusted_metrics = self._adjust_reward_metrics(
+            metrics=dict(metrics),
+            task=task,
+            prev_state=prev_state,
+            next_state=next_state,
+            move_distance_norm=move_distance_norm,
+        )
+        return next_payload, adjusted_metrics, actions
 
     def render_prompts(
         self,
@@ -222,6 +259,8 @@ class BridgeBuildAdapter:
                 AgentMetaObservation(
                     grid=channels,
                     scalars=scalars,
+                    belief_target=self._build_belief_target(task=task),
+                    belief_mask=self._build_belief_mask(task=task),
                     task_index=int(self.task_id_to_index[task_id]),
                     task_id=task_id,
                     turn_index=int(obs["turn_index"]),
@@ -526,7 +565,16 @@ class BridgeBuildAdapter:
                 out["n"].append(item)
 
         for coord in candidates:
-            if coord is None or len(coord) < 2:
+            if coord is None:
+                continue
+            if isinstance(coord, Mapping):
+                x = coord.get("x")
+                z = coord.get("z")
+                if x is None or z is None:
+                    continue
+                out["candidate"].append((int(x), int(z)))
+                continue
+            if len(coord) < 2:
                 continue
             out["candidate"].append((int(coord[0]), int(coord[1])))
 
@@ -537,3 +585,85 @@ class BridgeBuildAdapter:
         for x, z in coords:
             if 0 <= int(x) < w and 0 <= int(z) < h:
                 channel[int(z), int(x)] = 1.0
+
+    def _belief_index(self, coord: Coord) -> int:
+        x, z = int(coord[0]), int(coord[1])
+        return int(z * self.max_width + x)
+
+    def _build_belief_target(self, *, task: Any) -> torch.Tensor:
+        target = torch.zeros(self.belief_dim, dtype=torch.float32)
+        for coord in task.true_pillars:
+            target[self._belief_index(coord)] = 1.0
+        return target
+
+    def _build_belief_mask(self, *, task: Any) -> torch.Tensor:
+        mask = torch.zeros(self.belief_dim, dtype=torch.bool)
+        for coord in task.candidate_pillars:
+            mask[self._belief_index(coord)] = True
+        return mask
+
+    def _movement_target_anchors(self, *, task: Any, agent_idx: int) -> Sequence[Coord]:
+        if int(agent_idx) == 0:
+            return [(int(x), int(z)) for x, z in task.anchors_t]
+        return [(int(x), int(z)) for x, z in task.anchors_s]
+
+    def _min_manhattan_distance(self, *, origin: Coord, targets: Sequence[Coord]) -> int:
+        if not targets:
+            return 0
+        ox, oz = int(origin[0]), int(origin[1])
+        return min(abs(ox - int(tx)) + abs(oz - int(tz)) for tx, tz in targets)
+
+    def _movement_distances(self, *, task: Any, state: Any) -> List[int]:
+        distances: List[int] = []
+        for agent_idx, pos in enumerate(state.agent_positions):
+            targets = self._movement_target_anchors(task=task, agent_idx=agent_idx)
+            distances.append(
+                self._min_manhattan_distance(
+                    origin=(int(pos[0]), int(pos[1])),
+                    targets=targets,
+                )
+            )
+        return distances
+
+    def _movement_distance_total(self, *, task: Any, state: Any) -> float:
+        return float(sum(self._movement_distances(task=task, state=state)))
+
+    def _adjust_reward_metrics(
+        self,
+        *,
+        metrics: Dict[str, Any],
+        task: Any,
+        prev_state: Any,
+        next_state: Any,
+        move_distance_norm: float,
+    ) -> Dict[str, Any]:
+        reward = float(metrics.get("reward", 0.0))
+
+        base_cc_merge = float(metrics.get("bonus_cc_merge", 0.0))
+        adjusted_cc_merge = base_cc_merge * self.cc_merge_bonus_scale
+        metrics["bonus_cc_merge"] = adjusted_cc_merge
+        reward += adjusted_cc_merge - base_cc_merge
+
+        base_penalty = float(metrics.get("penalty_n_adjacent", 0.0))
+        adjusted_penalty = base_penalty * self.n_adjacent_penalty_scale
+        metrics["penalty_n_adjacent"] = adjusted_penalty
+        reward -= adjusted_penalty - base_penalty
+
+        prev_distances = self._movement_distances(task=task, state=prev_state)
+        next_distances = self._movement_distances(task=task, state=next_state)
+        prev_total_distance = float(sum(prev_distances))
+        next_total_distance = float(sum(next_distances))
+        if self.move_progress_bonus_total > 0.0 and move_distance_norm > 0.0:
+            move_bonus = self.move_progress_bonus_total * (
+                (prev_total_distance - next_total_distance) / move_distance_norm
+            )
+        else:
+            move_bonus = 0.0
+        reward += move_bonus
+
+        metrics["bonus_move_progress"] = float(move_bonus)
+        metrics["agent_a_target_distance"] = float(next_distances[0]) if next_distances else 0.0
+        metrics["agent_b_target_distance"] = float(next_distances[1]) if len(next_distances) > 1 else 0.0
+        metrics["target_distance_total"] = float(next_total_distance)
+        metrics["reward"] = reward
+        return metrics

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 import os
 import random
@@ -22,6 +23,33 @@ from LLM_Collab_Minecraft.bridge_build_meta.adapters import BridgeBuildAdapter
 from LLM_Collab_Minecraft.bridge_build_meta.models import (
     BeliefEncoder,
     CausalLMWithContextValueHead,
+    StructuredValueCritic,
+)
+
+
+_ENV_METRIC_KEYS: Tuple[str, ...] = (
+    "bonus_gap_st",
+    "bonus_cc_merge",
+    "bonus_y_connected",
+    "penalty_n_adjacent",
+    "penalty_block_cost",
+    "bonus_terminal_connect",
+    "new_cc_merge_count",
+    "new_connected_y_count",
+    "new_adjacent_n_count",
+    "newly_placed_block_count",
+    "num_valid_probes",
+    "comm_tokens",
+    "connected",
+    "gap_st",
+    "cc_component_count",
+    "connected_y_count",
+    "n_adjacent_count",
+    "y_uncovered_count",
+    "bonus_move_progress",
+    "agent_a_target_distance",
+    "agent_b_target_distance",
+    "target_distance_total",
 )
 
 
@@ -45,6 +73,7 @@ class BCMAACConfig:
     num_turns: int = 4
     discount: float = 0.9
     critic_type: str = "v"
+    critic_backbone: str = "structured"
     logging_steps: int = 20
     eval_interval: int = 10
     eval_num_samples: int = 2
@@ -55,6 +84,8 @@ class BCMAACConfig:
     value_head_hidden_dim: Optional[int] = None
     actor_condition_dim: Optional[int] = None
     critic_condition_dim: Optional[int] = None
+    actor_prompt_context_scale: float = 1.0
+    actor_response_context_scale: float = 0.15
 
     def __post_init__(self) -> None:
         if self.num_agents < 1:
@@ -67,8 +98,14 @@ class BCMAACConfig:
             raise ValueError("train_batch_size must be >= 1.")
         if self.critic_type not in ("v", "q"):
             raise ValueError("critic_type must be 'v' or 'q'.")
+        if str(self.critic_backbone).strip().lower() not in ("structured", "text"):
+            raise ValueError("critic_backbone must be 'structured' or 'text'.")
         if self.logging_steps < 1:
             raise ValueError("logging_steps must be >= 1.")
+        if self.actor_prompt_context_scale < 0.0:
+            raise ValueError("actor_prompt_context_scale must be >= 0.")
+        if self.actor_response_context_scale < 0.0:
+            raise ValueError("actor_response_context_scale must be >= 0.")
 
 
 @dataclass
@@ -128,13 +165,17 @@ class BCMAACTrainer:
             critic_devices,
             fallback_device=self.agent_devices[0],
         )
+        self.critic_backbone = str(self.args.critic_backbone).strip().lower()
         self.agent_tokenizers = self._resolve_tokenizers(agent_model, agents)
-        self.critic_tokenizer = self._resolve_critic_tokenizer(critic_model, critics)
+        self.critic_tokenizer = (
+            self._resolve_critic_tokenizer(critic_model, critics)
+            if self.critic_backbone == "text"
+            else None
+        )
         if self.adapter.tokenizer is None:
             self.adapter.tokenizer = self.agent_tokenizers[0]
 
         self.agents = self._load_actor_models(agent_model=agent_model, agents=agents)
-        self.critic = self._load_critic_model(critic_model=critic_model, critics=critics)
 
         joint_context_dim = (
             self.args.context_hidden_dim
@@ -145,10 +186,15 @@ class BCMAACTrainer:
             grid_channels=self.adapter.grid_channels,
             scalar_dim=self.adapter.scalar_dim,
             hidden_dim=self.args.context_hidden_dim,
-            task_vocab_size=self.adapter.task_vocab_size,
+            belief_dim=self.adapter.belief_dim,
             cnn_channels=self.args.context_cnn_channels,
             scalar_hidden_dim=self.args.context_scalar_hidden_dim,
         ).to(self.critic_device)
+        self.critic = self._load_critic_model(
+            critic_model=critic_model,
+            critics=critics,
+            joint_context_dim=joint_context_dim,
+        )
 
         for actor, device in zip(self.agents, self.agent_devices):
             actor.to(device)
@@ -186,19 +232,11 @@ class BCMAACTrainer:
                 buffer.append(trajectory)
 
                 if len(buffer) >= self.args.rollout_buffer_size:
-                    update_metrics = self._update(buffer)
-                    for key, value in update_metrics.items():
-                        epoch_metrics[key].append(value)
-                    if self._should_log_train():
-                        self._log_metrics(update_metrics)
+                    self._flush_buffer(buffer=buffer, epoch_metrics=epoch_metrics)
                     buffer = []
 
             if buffer:
-                update_metrics = self._update(buffer)
-                for key, value in update_metrics.items():
-                    epoch_metrics[key].append(value)
-                if self._should_log_train():
-                    self._log_metrics(update_metrics)
+                self._flush_buffer(buffer=buffer, epoch_metrics=epoch_metrics)
 
             epoch_log = self._build_epoch_log(epoch_metrics)
             if self.verbose and epoch_log:
@@ -228,9 +266,13 @@ class BCMAACTrainer:
         os.makedirs(output_dir, exist_ok=True)
         self.context_encoder.save_path = output_dir  # type: ignore[attr-defined]
         torch.save(self.context_encoder.state_dict(), os.path.join(output_dir, "context_encoder.pt"))
-        self.critic.model.save_pretrained(os.path.join(output_dir, "critic"))
-        self.critic_tokenizer.save_pretrained(os.path.join(output_dir, "critic"))
-        torch.save(self.critic.state_dict(), os.path.join(output_dir, "critic_context_head.pt"))
+        if self.critic_backbone == "text":
+            self.critic.model.save_pretrained(os.path.join(output_dir, "critic"))
+            if self.critic_tokenizer is not None:
+                self.critic_tokenizer.save_pretrained(os.path.join(output_dir, "critic"))
+            torch.save(self.critic.state_dict(), os.path.join(output_dir, "critic_context_head.pt"))
+        else:
+            torch.save(self.critic.state_dict(), os.path.join(output_dir, "structured_critic.pt"))
         for idx, actor in enumerate(self.agents):
             actor_dir = os.path.join(output_dir, f"agent_{idx}")
             actor.model.save_pretrained(actor_dir)
@@ -349,8 +391,11 @@ class BCMAACTrainer:
 
         per_turn_policy_loss: Dict[int, List[float]] = defaultdict(list)
         per_turn_value_loss: Dict[int, List[float]] = defaultdict(list)
+        per_turn_belief_loss: Dict[int, List[float]] = defaultdict(list)
+        per_turn_belief_accuracy: Dict[int, List[float]] = defaultdict(list)
         extra_loss_accum = {
-            "task_loss": 0.0,
+            "belief_loss": 0.0,
+            "belief_accuracy": 0.0,
             "entropy": 0.0,
         }
 
@@ -365,7 +410,8 @@ class BCMAACTrainer:
 
             for turn_idx, turn in enumerate(traj.turns):
                 contexts: List[torch.Tensor] = []
-                turn_task_losses: List[torch.Tensor] = []
+                turn_belief_losses: List[torch.Tensor] = []
+                turn_belief_accuracies: List[torch.Tensor] = []
                 for agent_idx in range(self.args.num_agents):
                     obs = turn.meta_obs[agent_idx]
                     hidden_in = hidden_states[agent_idx]
@@ -378,15 +424,19 @@ class BCMAACTrainer:
                     )
                     hidden_states[agent_idx] = encoder_out.hidden.detach()
                     contexts.append(encoder_out.context)
-                    target = torch.tensor([obs.task_index], device=self.critic_device, dtype=torch.long)
-                    turn_task_losses.append(F.cross_entropy(encoder_out.task_logits, target))
+                    if bool(obs.belief_mask.any()):
+                        masked_logits = encoder_out.belief_logits.view(-1)[obs.belief_mask.to(self.critic_device)]
+                        masked_target = obs.belief_target.to(self.critic_device, dtype=masked_logits.dtype)[
+                            obs.belief_mask.to(self.critic_device)
+                        ]
+                        belief_loss = F.binary_cross_entropy_with_logits(masked_logits, masked_target)
+                        belief_preds = (masked_logits >= 0).to(dtype=masked_target.dtype)
+                        belief_accuracy = (belief_preds == masked_target).to(dtype=torch.float32).mean()
+                        turn_belief_losses.append(belief_loss)
+                        turn_belief_accuracies.append(belief_accuracy)
 
                 joint_context = self.adapter.build_joint_context(contexts)
-                critic_input = self._build_critic_input(
-                    turn.prompts,
-                    action_completions=turn.completions if self.critic_type == "q" else None,
-                )
-                value = self._critic_value_from_text(critic_input, joint_context)
+                value = self._critic_value(joint_context, turn=turn)
                 ret = torch.tensor([returns[turn_idx]], device=self.critic_device, dtype=value.dtype)
                 value_loss_turn = (value - ret).pow(2).mean()
 
@@ -418,14 +468,19 @@ class BCMAACTrainer:
                     actor_turn_loss_values.append(float(actor_loss.detach().item()))
                     entropy_turn_values.append(float(entropy_value.detach().item()))
 
-                task_loss_turn = (
-                    torch.stack(turn_task_losses).mean()
-                    if turn_task_losses
+                belief_loss_turn = (
+                    torch.stack(turn_belief_losses).mean()
+                    if turn_belief_losses
+                    else torch.zeros((), device=self.critic_device, dtype=ret.dtype)
+                )
+                belief_accuracy_turn = (
+                    torch.stack(turn_belief_accuracies).mean()
+                    if turn_belief_accuracies
                     else torch.zeros((), device=self.critic_device, dtype=ret.dtype)
                 )
                 shared_turn_loss = (
                     self.args.value_loss_coef * value_loss_turn
-                    + self.args.task_loss_coef * task_loss_turn
+                    + self.args.task_loss_coef * belief_loss_turn
                 ) / float(total_turns)
                 shared_turn_loss.backward()
 
@@ -442,7 +497,11 @@ class BCMAACTrainer:
 
                 per_turn_policy_loss[turn_idx].append(float(actor_loss_turn))
                 per_turn_value_loss[turn_idx].append(float(value_loss_turn.detach().item()))
-                extra_loss_accum["task_loss"] += float(task_loss_turn.detach().item())
+                if turn_belief_losses:
+                    per_turn_belief_loss[turn_idx].append(float(belief_loss_turn.detach().item()))
+                    per_turn_belief_accuracy[turn_idx].append(float(belief_accuracy_turn.detach().item()))
+                extra_loss_accum["belief_loss"] += float(belief_loss_turn.detach().item())
+                extra_loss_accum["belief_accuracy"] += float(belief_accuracy_turn.detach().item())
                 extra_loss_accum["entropy"] += float(entropy_turn)
 
         if self.args.max_grad_norm is not None and self.args.max_grad_norm > 0:
@@ -462,8 +521,17 @@ class BCMAACTrainer:
         for turn_idx, values in per_turn_value_loss.items():
             if values:
                 rollout_metrics.setdefault(turn_idx, {})["value_loss"] = float(sum(values) / len(values))
+        for turn_idx, values in per_turn_belief_loss.items():
+            if values:
+                rollout_metrics.setdefault(turn_idx, {})["belief_loss"] = float(sum(values) / len(values))
+                rollout_metrics.setdefault(turn_idx, {})["task_loss"] = float(sum(values) / len(values))
+        for turn_idx, values in per_turn_belief_accuracy.items():
+            if values:
+                rollout_metrics.setdefault(turn_idx, {})["belief_accuracy"] = float(sum(values) / len(values))
 
-        rollout_metrics.setdefault(0, {})["task_loss"] = float(extra_loss_accum["task_loss"] / float(total_turns))
+        rollout_metrics.setdefault(0, {})["belief_loss"] = float(extra_loss_accum["belief_loss"] / float(total_turns))
+        rollout_metrics.setdefault(0, {})["belief_accuracy"] = float(extra_loss_accum["belief_accuracy"] / float(total_turns))
+        rollout_metrics.setdefault(0, {})["task_loss"] = float(extra_loss_accum["belief_loss"] / float(total_turns))
         rollout_metrics.setdefault(0, {})["entropy"] = float(extra_loss_accum["entropy"] / float(total_turns))
         return self._flatten_turn_metrics(rollout_metrics)
 
@@ -491,7 +559,12 @@ class BCMAACTrainer:
         context_vec = context_vec.to(model_device)
 
         with torch.no_grad():
-            context_mask = torch.ones_like(prompt_input_ids, device=model_device, dtype=torch.float32)
+            context_mask = torch.full_like(
+                prompt_input_ids,
+                float(self.args.actor_prompt_context_scale),
+                device=model_device,
+                dtype=torch.float32,
+            )
             outputs = model(
                 input_ids=prompt_input_ids,
                 attention_mask=attention_mask,
@@ -512,6 +585,20 @@ class BCMAACTrainer:
                 generated.append(next_token)
                 if eos_token_id is not None and int(next_token.item()) == int(eos_token_id):
                     break
+                token_fragment = tokenizer.decode(
+                    next_token.view(-1),
+                    skip_special_tokens=True,
+                    clean_up_tokenization_spaces=False,
+                )
+                if "}" in token_fragment:
+                    partial_ids = torch.stack(generated, dim=0).view(1, -1)
+                    partial_completion = tokenizer.decode(
+                        partial_ids[0],
+                        skip_special_tokens=True,
+                        clean_up_tokenization_spaces=False,
+                    )
+                    if self._completion_has_action_json(partial_completion):
+                        break
                 input_ids = next_token.view(1, 1)
                 attention_mask = torch.cat(
                     [
@@ -520,12 +607,19 @@ class BCMAACTrainer:
                     ],
                     dim=1,
                 )
-                outputs = model.model(
+                outputs = model(
                     input_ids=input_ids,
                     attention_mask=attention_mask,
+                    context_vec=context_vec,
+                    context_mask=torch.full_like(
+                        input_ids,
+                        float(self.args.actor_response_context_scale),
+                        dtype=torch.float32,
+                        device=model_device,
+                    ),
                     past_key_values=past_key_values,
                     use_cache=True,
-                    return_dict=True,
+                    output_values=False,
                 )
                 past_key_values = outputs.past_key_values
                 next_token_logits = outputs.logits[:, -1, :]
@@ -547,6 +641,51 @@ class BCMAACTrainer:
             "response_len": int(generated_ids.size(1)),
             "completion": completion,
         }
+
+    def _completion_has_action_json(self, text: str) -> bool:
+        raw = str(text or "")
+        if not raw:
+            return False
+        action_keys = ("comm", "probe", "cmds", "path")
+        start = raw.find("{")
+        if start < 0:
+            return False
+
+        depth = 0
+        in_string = False
+        quote_char = ""
+        escape = False
+        for idx in range(start, len(raw)):
+            cur = raw[idx]
+            if in_string:
+                if escape:
+                    escape = False
+                    continue
+                if cur == "\\":
+                    escape = True
+                    continue
+                if cur == quote_char:
+                    in_string = False
+                continue
+            if cur in ('"', "'"):
+                in_string = True
+                quote_char = cur
+                continue
+            if cur == "{":
+                depth += 1
+                continue
+            if cur != "}":
+                continue
+            depth -= 1
+            if depth != 0:
+                continue
+            candidate = raw[start : idx + 1]
+            try:
+                obj = json.loads(candidate)
+            except Exception:
+                continue
+            return isinstance(obj, dict) and any(key in obj for key in action_keys)
+        return False
 
     def _sample_token(self, logits: torch.Tensor, *, training: bool) -> torch.Tensor:
         logits = logits.squeeze(0)
@@ -588,8 +727,14 @@ class BCMAACTrainer:
         sequences = sequences.to(model_device)
         attention_mask = attention_mask.to(model_device)
         context_vec = context_vec.to(model_device)
-        context_mask = torch.zeros_like(sequences, dtype=torch.float32, device=model_device)
-        context_mask[:, :prompt_len] = 1.0
+        context_mask = torch.full_like(
+            sequences,
+            float(self.args.actor_response_context_scale),
+            dtype=torch.float32,
+            device=model_device,
+        )
+        if prompt_len > 0:
+            context_mask[:, :prompt_len] = float(self.args.actor_prompt_context_scale)
         outputs = model(
             input_ids=sequences,
             attention_mask=attention_mask,
@@ -640,6 +785,15 @@ class BCMAACTrainer:
         last_index = int(input_ids.size(1) - 1)
         return outputs.values[:, last_index]
 
+    def _critic_value(self, joint_context: torch.Tensor, *, turn: TurnRecord) -> torch.Tensor:
+        if self.critic_backbone == "structured":
+            return self.critic(joint_context.to(self.critic_device))
+        critic_input = self._build_critic_input(
+            turn.prompts,
+            action_completions=turn.completions if self.critic_type == "q" else None,
+        )
+        return self._critic_value_from_text(critic_input, joint_context)
+
     def _build_critic_input(
         self,
         prompts: Sequence[str],
@@ -687,6 +841,7 @@ class BCMAACTrainer:
         turn_returns: Dict[int, List[float]] = defaultdict(list)
         turn_values: Dict[int, List[float]] = defaultdict(list)
         turn_targets: Dict[int, List[float]] = defaultdict(list)
+        turn_env_metrics: Dict[int, Dict[str, List[float]]] = defaultdict(lambda: defaultdict(list))
 
         with torch.no_grad():
             for traj in trajectories:
@@ -710,15 +865,22 @@ class BCMAACTrainer:
                         contexts.append(encoder_out.context.detach())
 
                     joint_context = self.adapter.build_joint_context(contexts)
-                    critic_input = self._build_critic_input(
-                        turn.prompts,
-                        action_completions=turn.completions if self.critic_type == "q" else None,
-                    )
-                    value = self._critic_value_from_text(critic_input, joint_context).detach().view(-1)[0]
+                    value = self._critic_value(joint_context, turn=turn).detach().view(-1)[0]
                     turn_rewards[turn_idx].append(float(turn.reward))
                     turn_returns[turn_idx].append(float(returns[turn_idx]))
                     turn_values[turn_idx].append(float(value.item()))
                     turn_targets[turn_idx].append(float(returns[turn_idx]))
+                    for key in _ENV_METRIC_KEYS:
+                        if key not in turn.metrics:
+                            continue
+                        raw_value = turn.metrics.get(key)
+                        if isinstance(raw_value, bool):
+                            turn_env_metrics[turn_idx][key].append(1.0 if raw_value else 0.0)
+                            continue
+                        try:
+                            turn_env_metrics[turn_idx][key].append(float(raw_value))
+                        except (TypeError, ValueError):
+                            continue
                     adv = torch.tensor(
                         float(returns[turn_idx]) - float(value.item()),
                         device=self.critic_device,
@@ -749,6 +911,10 @@ class BCMAACTrainer:
                 metrics["value_pred_mean"] = float(sum(turn_values[turn_idx]) / len(turn_values[turn_idx]))
             if turn_targets.get(turn_idx):
                 metrics["value_target_mean"] = float(sum(turn_targets[turn_idx]) / len(turn_targets[turn_idx]))
+            if turn_env_metrics.get(turn_idx):
+                for key, values in turn_env_metrics[turn_idx].items():
+                    if values:
+                        metrics[key] = float(sum(values) / len(values))
             if metrics:
                 rollout_metrics[turn_idx] = metrics
         return normalized_advantages, rollout_metrics
@@ -788,10 +954,29 @@ class BCMAACTrainer:
             _maybe_log("value_target_mean", "epoch_value_target_mean")
             _maybe_log("policy_loss", "epoch_policy_loss")
             _maybe_log("value_loss", "epoch_value_loss")
+            _maybe_log("belief_loss", "epoch_belief_loss")
+            _maybe_log("belief_accuracy", "epoch_belief_accuracy")
             if turn_idx == 0:
                 _maybe_log("task_loss", "epoch_task_loss")
                 _maybe_log("entropy", "epoch_entropy")
         return epoch_log
+
+    def _flush_buffer(
+        self,
+        *,
+        buffer: Sequence[EpisodeTrajectory],
+        epoch_metrics: Dict[str, List[float]],
+    ) -> None:
+        batch_size = max(1, int(self.args.train_batch_size))
+        for start in range(0, len(buffer), batch_size):
+            batch = list(buffer[start : start + batch_size])
+            if not batch:
+                continue
+            update_metrics = self._update(batch)
+            for key, value in update_metrics.items():
+                epoch_metrics[key].append(value)
+            if self._should_log_train():
+                self._log_metrics(update_metrics)
 
     def _log_metrics(self, metrics: Mapping[str, float]) -> None:
         if not metrics:
@@ -822,6 +1007,7 @@ class BCMAACTrainer:
                 "num_agents": self.args.num_agents,
                 "num_turns": self.args.num_turns,
                 "critic_type": self.args.critic_type,
+                "critic_backbone": self.critic_backbone,
                 "context_hidden_dim": self.args.context_hidden_dim,
             },
         }
@@ -909,7 +1095,14 @@ class BCMAACTrainer:
         *,
         critic_model: Optional[Union[str, PreTrainedModel]],
         critics: Optional[Sequence[Union[str, PreTrainedModel]]],
-    ) -> CausalLMWithContextValueHead:
+        joint_context_dim: int,
+    ) -> nn.Module:
+        if self.critic_backbone == "structured":
+            hidden_dim = self.args.value_head_hidden_dim or max(256, joint_context_dim)
+            return StructuredValueCritic(
+                input_dim=joint_context_dim,
+                hidden_dim=hidden_dim,
+            )
         if critics is not None:
             if len(critics) != 1:
                 raise ValueError("bridge_build_meta expects exactly one critic.")

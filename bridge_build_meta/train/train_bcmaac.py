@@ -152,6 +152,17 @@ def _build_reward_processor(cfg: Dict[str, Any]):
     return lambda x: float(x) * scale + shift
 
 
+def _build_reward_config(cfg: Dict[str, Any]) -> Dict[str, float]:
+    reward_cfg = cfg.get("reward_shaping") or {}
+    if not isinstance(reward_cfg, dict):
+        reward_cfg = {}
+    return {
+        "n_adjacent_penalty_scale": float(reward_cfg.get("n_adjacent_penalty_scale", 1.5)),
+        "cc_merge_bonus_scale": float(reward_cfg.get("cc_merge_bonus_scale", 0.5)),
+        "move_progress_bonus_total": float(reward_cfg.get("move_progress_bonus_total", 2.5)),
+    }
+
+
 def _pick_devices(section: Mapping[str, Any], key: str) -> Any:
     value = section.get(key)
     if value is None:
@@ -175,7 +186,7 @@ def _build_bcmaac_config(cfg: Dict[str, Any]) -> BCMAACConfig:
         rollout_buffer_size=int(trainer_cfg.get("rollout_buffer_size", 1)),
         train_batch_size=int(trainer_cfg.get("train_batch_size", 1)),
         value_loss_coef=float(trainer_cfg.get("value_loss_coef", 0.6)),
-        task_loss_coef=float(meta_cfg.get("task_loss_coef", 0.5)),
+        task_loss_coef=float(meta_cfg.get("belief_loss_coef", meta_cfg.get("task_loss_coef", 0.5))),
         entropy_coef=float(meta_cfg.get("entropy_coef", 0.0)),
         max_grad_norm=float(meta_cfg.get("max_grad_norm", 1.0)) if meta_cfg.get("max_grad_norm", 1.0) is not None else None,
         max_new_tokens=int(trainer_cfg.get("max_new_tokens", 512)),
@@ -187,6 +198,7 @@ def _build_bcmaac_config(cfg: Dict[str, Any]) -> BCMAACConfig:
         num_turns=int(trainer_cfg.get("num_turns", 4)),
         discount=float(trainer_cfg.get("discount", 0.9)),
         critic_type=str(trainer_cfg.get("critic_type", "v")).strip().lower(),
+        critic_backbone=str(meta_cfg.get("critic_backbone", trainer_cfg.get("critic_backbone", "structured"))).strip().lower(),
         logging_steps=int(trainer_cfg.get("logging_steps", 20)),
         eval_interval=int(trainer_cfg.get("eval_interval", 10)),
         eval_num_samples=int(trainer_cfg.get("eval_num_samples", 2)),
@@ -197,6 +209,8 @@ def _build_bcmaac_config(cfg: Dict[str, Any]) -> BCMAACConfig:
         value_head_hidden_dim=int(meta_cfg.get("value_head_hidden_dim")) if meta_cfg.get("value_head_hidden_dim") is not None else None,
         actor_condition_dim=int(meta_cfg.get("actor_condition_dim")) if meta_cfg.get("actor_condition_dim") is not None else None,
         critic_condition_dim=int(meta_cfg.get("critic_condition_dim")) if meta_cfg.get("critic_condition_dim") is not None else None,
+        actor_prompt_context_scale=float(meta_cfg.get("actor_prompt_context_scale", 1.0)),
+        actor_response_context_scale=float(meta_cfg.get("actor_response_context_scale", 0.15)),
     )
 
 
@@ -276,11 +290,13 @@ def main() -> int:
         prompt_ctx=prompt_ctx,
         num_agents=trainer_args.num_agents,
         task_ids=[str(item["task_id"]) for item in items],
+        task_specs=tasks,
         tokenizer=tokenizer,
         external_mode=str((cfg.get("external") or {}).get("mode", "empty_feedback")),
         original_prompt=bool((cfg.get("external") or {}).get("original_prompt", True)),
         previous_response=bool((cfg.get("external") or {}).get("previous_response", False)),
         debug=bool(cfg.get("debug", False)),
+        reward_config=_build_reward_config(cfg),
     )
 
     model_kwargs: Dict[str, Any] = {}
