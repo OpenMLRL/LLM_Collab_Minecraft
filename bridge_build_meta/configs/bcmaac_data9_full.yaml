@@ -81,7 +81,7 @@ meta:
   critic_condition_dim: 128
   actor_prompt_context_scale: 1.0
   actor_response_context_scale: 0.15
-  score_chunk_size: 1
+  score_chunk_size: 2
   actor_gradient_checkpointing: true
 
 reward_shaping:
