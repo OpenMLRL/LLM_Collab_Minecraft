@@ -211,6 +211,7 @@ def _build_bcmaac_config(cfg: Dict[str, Any]) -> BCMAACConfig:
         critic_condition_dim=int(meta_cfg.get("critic_condition_dim")) if meta_cfg.get("critic_condition_dim") is not None else None,
         actor_prompt_context_scale=float(meta_cfg.get("actor_prompt_context_scale", 1.0)),
         actor_response_context_scale=float(meta_cfg.get("actor_response_context_scale", 0.15)),
+        preference_loss_coef=float(meta_cfg.get("preference_loss_coef", 0.1)),
         score_chunk_size=int(meta_cfg.get("score_chunk_size", 0)),
         actor_gradient_checkpointing=bool(meta_cfg.get("actor_gradient_checkpointing", False)),
     )

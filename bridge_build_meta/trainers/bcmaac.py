@@ -87,6 +87,7 @@ class BCMAACConfig:
     critic_condition_dim: Optional[int] = None
     actor_prompt_context_scale: float = 1.0
     actor_response_context_scale: float = 0.15
+    preference_loss_coef: float = 0.1
     score_chunk_size: int = 0
     actor_gradient_checkpointing: bool = False
 
@@ -109,6 +110,8 @@ class BCMAACConfig:
             raise ValueError("actor_prompt_context_scale must be >= 0.")
         if self.actor_response_context_scale < 0.0:
             raise ValueError("actor_response_context_scale must be >= 0.")
+        if self.preference_loss_coef < 0.0:
+            raise ValueError("preference_loss_coef must be >= 0.")
         if self.score_chunk_size < 0:
             raise ValueError("score_chunk_size must be >= 0.")
 
@@ -141,6 +144,7 @@ class ActionChoiceTrace:
     response_prefix: str
     candidate_texts: List[str]
     chosen_index: int
+    preference_scores: Optional[List[float]] = None
 
 
 class BCMAACTrainer:
@@ -413,10 +417,12 @@ class BCMAACTrainer:
         per_turn_value_loss: Dict[int, List[float]] = defaultdict(list)
         per_turn_belief_loss: Dict[int, List[float]] = defaultdict(list)
         per_turn_belief_accuracy: Dict[int, List[float]] = defaultdict(list)
+        per_turn_preference_loss: Dict[int, List[float]] = defaultdict(list)
         extra_loss_accum = {
             "belief_loss": 0.0,
             "belief_accuracy": 0.0,
             "entropy": 0.0,
+            "preference_loss": 0.0,
         }
 
         self.context_optimizer.zero_grad()
@@ -467,7 +473,7 @@ class BCMAACTrainer:
                 for agent_idx in range(self.args.num_agents):
                     actor_device = self.agent_devices[agent_idx]
                     prompt_tokens = turn.sequences[agent_idx][: int(turn.prompt_lens[agent_idx])].unsqueeze(0).to(actor_device)
-                    actor_loss_value, entropy_value = self._backprop_action_traces(
+                    actor_loss_value, entropy_value, preference_loss_value = self._backprop_action_traces(
                         model=self.agents[agent_idx],
                         tokenizer=self.agent_tokenizers[agent_idx],
                         prompt_tokens=prompt_tokens,
@@ -478,6 +484,8 @@ class BCMAACTrainer:
                     )
                     actor_turn_loss_values.append(float(actor_loss_value))
                     entropy_turn_values.append(float(entropy_value))
+                    per_turn_preference_loss[turn_idx].append(float(preference_loss_value))
+                    extra_loss_accum["preference_loss"] += float(preference_loss_value)
 
                 belief_loss_turn = (
                     torch.stack(turn_belief_losses).mean()
@@ -539,11 +547,15 @@ class BCMAACTrainer:
         for turn_idx, values in per_turn_belief_accuracy.items():
             if values:
                 rollout_metrics.setdefault(turn_idx, {})["belief_accuracy"] = float(sum(values) / len(values))
+        for turn_idx, values in per_turn_preference_loss.items():
+            if values:
+                rollout_metrics.setdefault(turn_idx, {})["preference_loss"] = float(sum(values) / len(values))
 
         rollout_metrics.setdefault(0, {})["belief_loss"] = float(extra_loss_accum["belief_loss"] / float(total_turns))
         rollout_metrics.setdefault(0, {})["belief_accuracy"] = float(extra_loss_accum["belief_accuracy"] / float(total_turns))
         rollout_metrics.setdefault(0, {})["task_loss"] = float(extra_loss_accum["belief_loss"] / float(total_turns))
         rollout_metrics.setdefault(0, {})["entropy"] = float(extra_loss_accum["entropy"] / float(total_turns))
+        rollout_metrics.setdefault(0, {})["preference_loss"] = float(extra_loss_accum["preference_loss"] / float(total_turns))
         return self._flatten_turn_metrics(rollout_metrics)
 
     def _sample_completion(
@@ -669,6 +681,12 @@ class BCMAACTrainer:
             "cmds": list(action_candidates.cmd_options or [[]]),
             "path": list(action_candidates.path_options or [[]]),
         }
+        candidate_preferences: Dict[str, Optional[List[float]]] = {
+            "comm": list(action_candidates.comm_preference_scores) if action_candidates.comm_preference_scores is not None else None,
+            "probe": list(action_candidates.probe_preference_scores) if action_candidates.probe_preference_scores is not None else None,
+            "cmds": list(action_candidates.cmd_preference_scores) if action_candidates.cmd_preference_scores is not None else None,
+            "path": list(action_candidates.path_preference_scores) if action_candidates.path_preference_scores is not None else None,
+        }
         response_budget = self._serialize_action_json(
             {
                 field_name: self._select_longest_json_value(values)
@@ -691,6 +709,10 @@ class BCMAACTrainer:
                 self._serialize_json_value(value)
                 for value in (candidate_values.get(field_name) or [self._default_action_value(field_name)])
             ]
+            preference_scores = self._align_preference_scores(
+                preferences=candidate_preferences.get(field_name),
+                num_candidates=len(candidate_texts),
+            )
             scores = self._score_constrained_candidates(
                 model=model,
                 tokenizer=tokenizer,
@@ -707,6 +729,7 @@ class BCMAACTrainer:
                     response_prefix=response_prefix,
                     candidate_texts=list(candidate_texts),
                     chosen_index=int(chosen_index),
+                    preference_scores=preference_scores,
                 )
             )
 
@@ -803,15 +826,16 @@ class BCMAACTrainer:
         context_vec: torch.Tensor,
         advantage: float,
         loss_scale: float,
-    ) -> Tuple[float, float]:
+    ) -> Tuple[float, float, float]:
         if not action_traces:
-            return 0.0, 0.0
+            return 0.0, 0.0, 0.0
         model_device = self._module_device(model)
         prompt_tokens = prompt_tokens.to(model_device)
         context_vec = context_vec.to(model_device).detach()
         advantage_tensor = torch.tensor(float(advantage), device=model_device, dtype=torch.float32)
         total_actor_loss = 0.0
         entropy_values: List[float] = []
+        preference_values: List[float] = []
         num_traces = max(1, len(action_traces))
 
         for trace in action_traces:
@@ -829,16 +853,23 @@ class BCMAACTrainer:
             chosen_logprob = log_probs[int(trace.chosen_index)]
             trace_entropy = -(probs * log_probs).sum()
             trace_loss = -(chosen_logprob * advantage_tensor.to(dtype=chosen_logprob.dtype))
+            preference_loss = self._preference_loss_from_trace(
+                log_probs=log_probs,
+                trace=trace,
+            )
             scaled_trace_loss = (
                 trace_loss
+                + float(self.args.preference_loss_coef) * preference_loss
                 - float(self.args.entropy_coef) * (trace_entropy / float(num_traces))
             ) / max(float(loss_scale), 1.0)
             scaled_trace_loss.backward()
             total_actor_loss += float(trace_loss.detach().item())
             entropy_values.append(float(trace_entropy.detach().item()))
+            preference_values.append(float(preference_loss.detach().item()))
 
         entropy_mean = float(sum(entropy_values) / len(entropy_values)) if entropy_values else 0.0
-        return total_actor_loss, entropy_mean
+        preference_mean = float(sum(preference_values) / len(preference_values)) if preference_values else 0.0
+        return total_actor_loss, entropy_mean, preference_mean
 
     def _sequence_logprob(
         self,
@@ -967,6 +998,36 @@ class BCMAACTrainer:
         if field_name == "comm":
             return {}
         return []
+
+    def _align_preference_scores(
+        self,
+        *,
+        preferences: Optional[Sequence[float]],
+        num_candidates: int,
+    ) -> Optional[List[float]]:
+        if preferences is None:
+            return None
+        aligned = [float(x) for x in list(preferences)[:num_candidates]]
+        if len(aligned) < num_candidates:
+            aligned.extend([0.0] * (num_candidates - len(aligned)))
+        return aligned
+
+    def _preference_loss_from_trace(
+        self,
+        *,
+        log_probs: torch.Tensor,
+        trace: ActionChoiceTrace,
+    ) -> torch.Tensor:
+        pref_scores = trace.preference_scores
+        if not pref_scores or len(pref_scores) != int(log_probs.numel()):
+            return torch.zeros((), device=log_probs.device, dtype=log_probs.dtype)
+        pref_tensor = torch.tensor(pref_scores, device=log_probs.device, dtype=log_probs.dtype)
+        if pref_tensor.numel() <= 1:
+            return torch.zeros((), device=log_probs.device, dtype=log_probs.dtype)
+        if float((pref_tensor.max() - pref_tensor.min()).abs().item()) < 1e-6:
+            return torch.zeros((), device=log_probs.device, dtype=log_probs.dtype)
+        target_probs = torch.softmax(pref_tensor, dim=-1)
+        return -(target_probs * log_probs).sum()
 
     def _score_constrained_candidates(
         self,
@@ -1283,6 +1344,7 @@ class BCMAACTrainer:
             _maybe_log("value_loss", "epoch_value_loss")
             _maybe_log("belief_loss", "epoch_belief_loss")
             _maybe_log("belief_accuracy", "epoch_belief_accuracy")
+            _maybe_log("preference_loss", "epoch_preference_loss")
             if turn_idx == 0:
                 _maybe_log("task_loss", "epoch_task_loss")
                 _maybe_log("entropy", "epoch_entropy")

@@ -43,6 +43,10 @@ class AgentActionCandidates:
     probe_options: List[List[List[int]]]
     cmd_options: List[List[str]]
     path_options: List[List[List[int]]]
+    comm_preference_scores: Optional[List[float]] = None
+    probe_preference_scores: Optional[List[float]] = None
+    cmd_preference_scores: Optional[List[float]] = None
+    path_preference_scores: Optional[List[float]] = None
 
 
 class BridgeBuildAdapter:
@@ -307,31 +311,50 @@ class BridgeBuildAdapter:
                 agent_idx=agent_idx,
                 visible=visible,
             )
+            comm_options = self._build_comm_options(
+                obs=obs,
+                unknown_visible=unknown_visible,
+            )
+            probe_options = self._build_probe_options(
+                obs=obs,
+                unknown_visible=unknown_visible,
+            )
+            cmd_options = self._build_cmd_options(
+                task=task,
+                state=state,
+                agent_idx=agent_idx,
+                visible=visible,
+                allowed_blocks=allowed[agent_idx],
+                max_commands=int(limits[agent_idx]),
+                obs=obs,
+            )
+            path_options = self._build_path_options(
+                task=task,
+                state=state,
+                agent_idx=agent_idx,
+                unknown_visible=unknown_visible,
+                obs=obs,
+            )
             outputs.append(
                 AgentActionCandidates(
-                    comm_options=self._build_comm_options(
-                        obs=obs,
-                        unknown_visible=unknown_visible,
-                    ),
-                    probe_options=self._build_probe_options(
-                        obs=obs,
-                        unknown_visible=unknown_visible,
-                    ),
-                    cmd_options=self._build_cmd_options(
+                    comm_options=comm_options,
+                    probe_options=probe_options,
+                    cmd_options=cmd_options,
+                    path_options=path_options,
+                    comm_preference_scores=None,
+                    probe_preference_scores=None,
+                    cmd_preference_scores=self._build_cmd_preference_scores(
                         task=task,
-                        state=state,
-                        agent_idx=agent_idx,
-                        visible=visible,
-                        allowed_blocks=allowed[agent_idx],
-                        max_commands=int(limits[agent_idx]),
                         obs=obs,
+                        agent_idx=agent_idx,
+                        cmd_options=cmd_options,
                     ),
-                    path_options=self._build_path_options(
+                    path_preference_scores=self._build_path_preference_scores(
                         task=task,
-                        state=state,
-                        agent_idx=agent_idx,
-                        unknown_visible=unknown_visible,
                         obs=obs,
+                        agent_idx=agent_idx,
+                        path_options=path_options,
+                        cmd_options=cmd_options,
                     ),
                 )
             )
@@ -551,6 +574,263 @@ class BridgeBuildAdapter:
         x1, z1 = int(start[0]), int(start[1])
         x2, z2 = int(end[0]), int(end[1])
         return f"/fill {min(x1, x2)} {min(z1, z2)} {max(x1, x2)} {max(z1, z2)} {block}"
+
+    def _known_message_facts(self, *, obs: Mapping[str, Any]) -> Dict[str, List[Coord]]:
+        out = {"y": [], "n": [], "candidate": []}
+        for message in obs.get("received_messages") or []:
+            facts = self._extract_message_facts(message)
+            out["y"].extend(facts["y"])
+            out["n"].extend(facts["n"])
+            out["candidate"].extend(facts["candidate"])
+        return out
+
+    def _known_candidate_cells(self, *, obs: Mapping[str, Any]) -> set[Coord]:
+        out: set[Coord] = set()
+        for coord in obs.get("visible_p_candidates") or []:
+            if isinstance(coord, (list, tuple)) and len(coord) >= 2:
+                out.add((int(coord[0]), int(coord[1])))
+        for item in obs.get("known_probe_results") or []:
+            if not isinstance(item, Mapping):
+                continue
+            coord = item.get("coord")
+            if not isinstance(coord, (list, tuple)) or len(coord) < 2:
+                continue
+            out.add((int(coord[0]), int(coord[1])))
+        facts = self._known_message_facts(obs=obs)
+        out.update((int(x), int(z)) for x, z in facts["y"])
+        out.update((int(x), int(z)) for x, z in facts["n"])
+        out.update((int(x), int(z)) for x, z in facts["candidate"])
+        return out
+
+    def _known_n_cells(self, *, obs: Mapping[str, Any]) -> set[Coord]:
+        out: set[Coord] = set()
+        for item in obs.get("known_probe_results") or []:
+            if not isinstance(item, Mapping):
+                continue
+            if str(item.get("type") or "") != "N":
+                continue
+            coord = item.get("coord")
+            if not isinstance(coord, (list, tuple)) or len(coord) < 2:
+                continue
+            out.add((int(coord[0]), int(coord[1])))
+        facts = self._known_message_facts(obs=obs)
+        out.update((int(x), int(z)) for x, z in facts["n"])
+        return out
+
+    def _visible_land_cells(self, *, obs: Mapping[str, Any]) -> set[Coord]:
+        out: set[Coord] = set()
+        for coord in obs.get("visible_land_coords") or []:
+            if isinstance(coord, (list, tuple)) and len(coord) >= 2:
+                out.add((int(coord[0]), int(coord[1])))
+        return out
+
+    def _visible_filled_cells(self, *, obs: Mapping[str, Any]) -> set[Coord]:
+        out: set[Coord] = set()
+        for coord in obs.get("visible_filled_coords") or []:
+            if isinstance(coord, (list, tuple)) and len(coord) >= 2:
+                out.add((int(coord[0]), int(coord[1])))
+        return out
+
+    def _known_traversable_cells(
+        self,
+        *,
+        task: Any,
+        obs: Mapping[str, Any],
+        extra_filled: Optional[Iterable[Coord]] = None,
+    ) -> set[Coord]:
+        traversable = {
+            (int(x), int(z)) for x, z in [*task.anchors_s, *task.anchors_t]
+        }
+        traversable.update(self._visible_filled_cells(obs=obs))
+        traversable.update(self._known_candidate_cells(obs=obs))
+        if extra_filled is not None:
+            traversable.update((int(x), int(z)) for x, z in extra_filled)
+        return traversable
+
+    def _known_gap_estimate(
+        self,
+        *,
+        task: Any,
+        obs: Mapping[str, Any],
+        extra_filled: Optional[Iterable[Coord]] = None,
+    ) -> Optional[int]:
+        starts = {(int(x), int(z)) for x, z in task.anchors_s}
+        targets = {(int(x), int(z)) for x, z in task.anchors_t}
+        if not starts or not targets:
+            return None
+
+        traversable = self._known_traversable_cells(task=task, obs=obs, extra_filled=extra_filled)
+        immutable = self._visible_land_cells(obs=obs) | self._known_candidate_cells(obs=obs)
+
+        dist: Dict[Coord, int] = {pos: 0 for pos in starts}
+        queue: List[Coord] = list(starts)
+        from collections import deque
+
+        q = deque(queue)
+        while q:
+            cur = q.popleft()
+            cur_dist = dist[cur]
+            if cur in targets:
+                return int(cur_dist)
+            for nb in self._neighbors4(cur):
+                if not self._in_bounds(nb, task=task):
+                    continue
+                if nb in traversable:
+                    next_dist = cur_dist
+                elif nb in immutable:
+                    continue
+                else:
+                    next_dist = cur_dist + 1
+                prev = dist.get(nb)
+                if prev is not None and prev <= next_dist:
+                    continue
+                dist[nb] = next_dist
+                if next_dist == cur_dist:
+                    q.appendleft(nb)
+                else:
+                    q.append(nb)
+        return None
+
+    def _parse_fill_command_cells(self, cmd: str) -> set[Coord]:
+        raw = str(cmd or "").strip()
+        if not raw.startswith("/fill "):
+            return set()
+        parts = raw.split()
+        if len(parts) < 6:
+            return set()
+        try:
+            x1, z1, x2, z2 = (int(parts[1]), int(parts[2]), int(parts[3]), int(parts[4]))
+        except Exception:
+            return set()
+        out: set[Coord] = set()
+        for x in range(min(x1, x2), max(x1, x2) + 1):
+            for z in range(min(z1, z2), max(z1, z2) + 1):
+                out.add((int(x), int(z)))
+        return out
+
+    def _score_cmd_option(
+        self,
+        *,
+        task: Any,
+        obs: Mapping[str, Any],
+        agent_idx: int,
+        option: Sequence[str],
+    ) -> float:
+        cmds = [str(cmd) for cmd in option if str(cmd).strip()]
+        if not cmds:
+            return 0.0
+        current_pos_raw = obs.get("current_pos") or [0, 0]
+        current_pos = (int(current_pos_raw[0]), int(current_pos_raw[1]))
+        goal_hints = self._agent_goal_hints(task=task, obs=obs, agent_idx=agent_idx)
+        base_gap = self._known_gap_estimate(task=task, obs=obs)
+        cmd_cells: set[Coord] = set()
+        for cmd in cmds:
+            cmd_cells.update(self._parse_fill_command_cells(cmd))
+        if not cmd_cells:
+            return 0.0
+        next_gap = self._known_gap_estimate(task=task, obs=obs, extra_filled=cmd_cells)
+        gap_gain = 0.0
+        if base_gap is not None and next_gap is not None:
+            gap_gain = float(base_gap - next_gap)
+
+        known_traversable = self._known_traversable_cells(task=task, obs=obs)
+        known_n = self._known_n_cells(obs=obs)
+        frontier_touch = sum(1 for cell in cmd_cells if any(nb in known_traversable for nb in self._neighbors4(cell)))
+        n_touch = sum(1 for cell in cmd_cells if any(nb in known_n for nb in self._neighbors4(cell)))
+        cell_count = len(cmd_cells)
+        dist_cur = min(
+            abs(int(cell[0]) - int(current_pos[0])) + abs(int(cell[1]) - int(current_pos[1]))
+            for cell in cmd_cells
+        )
+        dist_goal = min(
+            self._min_manhattan_distance(origin=cell, targets=goal_hints)
+            for cell in cmd_cells
+        ) if goal_hints else 0
+        return (
+            4.0 * gap_gain
+            + 0.35 * float(frontier_touch)
+            - 0.25 * float(cell_count)
+            - 0.7 * float(n_touch)
+            - 0.05 * float(dist_cur)
+            - 0.03 * float(dist_goal)
+        )
+
+    def _build_cmd_preference_scores(
+        self,
+        *,
+        task: Any,
+        obs: Mapping[str, Any],
+        agent_idx: int,
+        cmd_options: Sequence[Sequence[str]],
+    ) -> Optional[List[float]]:
+        if not cmd_options:
+            return None
+        return [
+            float(self._score_cmd_option(task=task, obs=obs, agent_idx=agent_idx, option=option))
+            for option in cmd_options
+        ]
+
+    def _known_frontier_cells(self, *, task: Any, obs: Mapping[str, Any]) -> set[Coord]:
+        known_traversable = self._known_traversable_cells(task=task, obs=obs)
+        immutable = self._visible_land_cells(obs=obs) | self._known_candidate_cells(obs=obs)
+        frontier: set[Coord] = set()
+        for cell in known_traversable:
+            for nb in self._neighbors4(cell):
+                if not self._in_bounds(nb, task=task):
+                    continue
+                if nb in known_traversable or nb in immutable:
+                    continue
+                frontier.add(nb)
+        return frontier
+
+    def _build_path_preference_scores(
+        self,
+        *,
+        task: Any,
+        obs: Mapping[str, Any],
+        agent_idx: int,
+        path_options: Sequence[Sequence[Sequence[int]]],
+        cmd_options: Sequence[Sequence[str]],
+    ) -> Optional[List[float]]:
+        if not path_options:
+            return None
+        goal_hints = self._agent_goal_hints(task=task, obs=obs, agent_idx=agent_idx)
+        frontier = self._known_frontier_cells(task=task, obs=obs)
+        current_pos_raw = obs.get("current_pos") or [0, 0]
+        current_pos = (int(current_pos_raw[0]), int(current_pos_raw[1]))
+        cmd_scores = self._build_cmd_preference_scores(
+            task=task,
+            obs=obs,
+            agent_idx=agent_idx,
+            cmd_options=cmd_options,
+        ) or []
+        top_cmd_cells: set[Coord] = set()
+        for score, cmds in sorted(zip(cmd_scores, cmd_options), key=lambda item: item[0], reverse=True)[:2]:
+            if score <= 0.0:
+                continue
+            for cmd in cmds:
+                top_cmd_cells.update(self._parse_fill_command_cells(str(cmd)))
+        target_cells = top_cmd_cells or frontier
+        scores: List[float] = []
+        for option in path_options:
+            if not option:
+                scores.append(0.0)
+                continue
+            endpoint_raw = option[-1]
+            endpoint = (int(endpoint_raw[0]), int(endpoint_raw[1]))
+            path_len = max(0, len(option) - 1)
+            dist_goal = self._min_manhattan_distance(origin=endpoint, targets=goal_hints) if goal_hints else 0
+            dist_frontier = self._min_manhattan_distance(origin=endpoint, targets=list(frontier)) if frontier else 0
+            dist_target = self._min_manhattan_distance(origin=endpoint, targets=list(target_cells)) if target_cells else dist_goal
+            moved = 0.0 if endpoint == current_pos else 1.0
+            scores.append(
+                0.4 * moved
+                - 0.18 * float(path_len)
+                - 0.22 * float(dist_frontier)
+                - 0.12 * float(dist_goal)
+                - 0.28 * float(dist_target)
+            )
+        return scores
 
     def _extend_line_command(
         self,
