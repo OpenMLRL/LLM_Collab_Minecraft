@@ -568,6 +568,21 @@ class BridgeBuildAdapter:
                     max_steps=max(1, min(5, int(self.view) + 2)),
                 )
             )
+        closing_targets = self._closing_path_targets(
+            task=task,
+            obs=obs,
+            agent_idx=agent_idx,
+        )
+        max_steps = max(1, min(5, int(self.view) + 2))
+        for target in closing_targets[:2]:
+            options.append(
+                self._greedy_path(
+                    start=current_pos,
+                    target=target,
+                    task=task,
+                    max_steps=max_steps,
+                )
+            )
         return self._dedupe_jsonable_options(options)
 
     def _format_fill_command(self, *, start: Coord, end: Coord, block: str) -> str:
@@ -690,6 +705,103 @@ class BridgeBuildAdapter:
                 else:
                     q.append(nb)
         return None
+
+    def _known_connecting_path(
+        self,
+        *,
+        task: Any,
+        obs: Mapping[str, Any],
+        extra_filled: Optional[Iterable[Coord]] = None,
+    ) -> Optional[List[Coord]]:
+        starts = {(int(x), int(z)) for x, z in task.anchors_s}
+        targets = {(int(x), int(z)) for x, z in task.anchors_t}
+        if not starts or not targets:
+            return None
+
+        traversable = self._known_traversable_cells(task=task, obs=obs, extra_filled=extra_filled)
+        immutable = self._visible_land_cells(obs=obs) | self._known_candidate_cells(obs=obs)
+
+        from collections import deque
+
+        dist: Dict[Coord, int] = {pos: 0 for pos in starts}
+        prev: Dict[Coord, Optional[Coord]] = {pos: None for pos in starts}
+        q = deque(sorted(starts))
+        found: Optional[Coord] = None
+        while q:
+            cur = q.popleft()
+            cur_dist = dist[cur]
+            if cur in targets:
+                found = cur
+                break
+            for nb in self._neighbors4(cur):
+                if not self._in_bounds(nb, task=task):
+                    continue
+                if nb in traversable:
+                    next_dist = cur_dist
+                elif nb in immutable:
+                    continue
+                else:
+                    next_dist = cur_dist + 1
+                prev_dist = dist.get(nb)
+                if prev_dist is not None and prev_dist <= next_dist:
+                    continue
+                dist[nb] = next_dist
+                prev[nb] = cur
+                if next_dist == cur_dist:
+                    q.appendleft(nb)
+                else:
+                    q.append(nb)
+        if found is None:
+            return None
+        path_rev: List[Coord] = []
+        cur: Optional[Coord] = found
+        while cur is not None:
+            path_rev.append(cur)
+            cur = prev.get(cur)
+        return list(reversed(path_rev))
+
+    def _orient_path_for_agent(self, *, path: Sequence[Coord], agent_idx: int) -> List[Coord]:
+        oriented = [(int(x), int(z)) for x, z in path]
+        if int(agent_idx) == 0:
+            return oriented
+        return list(reversed(oriented))
+
+    def _closing_path_targets(
+        self,
+        *,
+        task: Any,
+        obs: Mapping[str, Any],
+        agent_idx: int,
+    ) -> List[Coord]:
+        path = self._known_connecting_path(task=task, obs=obs)
+        if not path:
+            return []
+        known_traversable = self._known_traversable_cells(task=task, obs=obs)
+        oriented = self._orient_path_for_agent(path=path, agent_idx=agent_idx)
+        missing_cells = [cell for cell in oriented if cell not in known_traversable]
+        if missing_cells:
+            targets: List[Coord] = [missing_cells[0]]
+            frontier_cells = [
+                cell
+                for cell in oriented
+                if cell in known_traversable and any(nb == missing_cells[0] for nb in self._neighbors4(cell))
+            ]
+            if frontier_cells:
+                targets.append(frontier_cells[0])
+            deduped: List[Coord] = []
+            seen: set[Coord] = set()
+            for cell in targets:
+                if cell in seen:
+                    continue
+                seen.add(cell)
+                deduped.append(cell)
+            return deduped
+        frontier_cells = [
+            cell
+            for cell in oriented
+            if cell in known_traversable and any(nb not in known_traversable for nb in self._neighbors4(cell))
+        ]
+        return frontier_cells[:1]
 
     def _parse_fill_command_cells(self, cmd: str) -> set[Coord]:
         raw = str(cmd or "").strip()
@@ -863,6 +975,56 @@ class BridgeBuildAdapter:
                 return self._format_fill_command(start=seed, end=end, block=block)
         return None
 
+    def _build_closing_cmd_options(
+        self,
+        *,
+        task: Any,
+        obs: Mapping[str, Any],
+        agent_idx: int,
+        placeable: set[Coord],
+        block: str,
+        max_commands: int,
+    ) -> List[List[str]]:
+        if max_commands <= 0 or not placeable:
+            return []
+        path = self._known_connecting_path(task=task, obs=obs)
+        if not path:
+            return []
+        known_traversable = self._known_traversable_cells(task=task, obs=obs)
+        oriented = self._orient_path_for_agent(path=path, agent_idx=agent_idx)
+        visible_missing = [cell for cell in oriented if cell not in known_traversable and cell in placeable]
+        if not visible_missing:
+            return []
+
+        closing_cmds: List[str] = []
+        for cell in visible_missing[:2]:
+            closing_cmds.append(self._format_fill_command(start=cell, end=cell, block=block))
+
+        if len(visible_missing) >= 2:
+            segment: List[Coord] = [visible_missing[0]]
+            for cell in visible_missing[1:]:
+                prev = segment[-1]
+                if abs(int(cell[0]) - int(prev[0])) + abs(int(cell[1]) - int(prev[1])) != 1:
+                    break
+                same_axis = int(cell[0]) == int(prev[0]) or int(cell[1]) == int(prev[1])
+                if not same_axis:
+                    break
+                segment.append(cell)
+                if len(segment) >= 3:
+                    break
+            if len(segment) >= 2:
+                closing_cmds.append(
+                    self._format_fill_command(start=segment[0], end=segment[-1], block=block)
+                )
+
+        closing_cmds = [str(cmd) for cmd in self._dedupe_jsonable_options(closing_cmds)]
+        options: List[List[str]] = []
+        for cmd in closing_cmds:
+            options.append([cmd])
+        if max_commands >= 2 and len(closing_cmds) >= 2:
+            options.append([closing_cmds[0], closing_cmds[1]])
+        return self._dedupe_jsonable_options(options)
+
     def _build_cmd_options(
         self,
         *,
@@ -929,6 +1091,16 @@ class BridgeBuildAdapter:
             options.append([str(cmd)])
         if max_commands >= 2 and len(command_pool) >= 2:
             options.append([str(command_pool[0]), str(command_pool[1])])
+        options.extend(
+            self._build_closing_cmd_options(
+                task=task,
+                obs=obs,
+                agent_idx=agent_idx,
+                placeable=placeable,
+                block=block,
+                max_commands=max_commands,
+            )
+        )
         return self._dedupe_jsonable_options(options)
 
     def _render_prompt(self, *, system_prompt: str, user_prompt: str) -> str:
