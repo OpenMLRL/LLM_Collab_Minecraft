@@ -272,7 +272,7 @@ class BridgeBuildAdapter:
                     grid=channels,
                     scalars=scalars,
                     belief_target=self._build_belief_target(task=task),
-                    belief_mask=self._build_belief_mask(task=task),
+                    belief_mask=self._build_belief_mask(task=task, obs=obs),
                     task_index=int(self.task_id_to_index[task_id]),
                     task_id=task_id,
                     turn_index=int(obs["turn_index"]),
@@ -341,8 +341,18 @@ class BridgeBuildAdapter:
                     probe_options=probe_options,
                     cmd_options=cmd_options,
                     path_options=path_options,
-                    comm_preference_scores=None,
-                    probe_preference_scores=None,
+                    comm_preference_scores=self._build_comm_preference_scores(
+                        task=task,
+                        obs=obs,
+                        agent_idx=agent_idx,
+                        comm_options=comm_options,
+                    ),
+                    probe_preference_scores=self._build_probe_preference_scores(
+                        task=task,
+                        obs=obs,
+                        agent_idx=agent_idx,
+                        probe_options=probe_options,
+                    ),
                     cmd_preference_scores=self._build_cmd_preference_scores(
                         task=task,
                         obs=obs,
@@ -511,6 +521,138 @@ class BridgeBuildAdapter:
             options.append([self._coord_list(coord) for coord in capped[:count]])
         return self._dedupe_jsonable_options(options)
 
+    def _coord_priority_score(
+        self,
+        *,
+        task: Any,
+        obs: Mapping[str, Any],
+        agent_idx: int,
+        coord: Coord,
+    ) -> float:
+        cell = (int(coord[0]), int(coord[1]))
+        current_pos_raw = obs.get("current_pos") or [0, 0]
+        current_pos = (int(current_pos_raw[0]), int(current_pos_raw[1]))
+        goal_hints = self._agent_goal_hints(task=task, obs=obs, agent_idx=agent_idx)
+        closing_targets = self._closing_path_targets(task=task, obs=obs, agent_idx=agent_idx)
+        frontier = self._known_frontier_cells(task=task, obs=obs)
+        known_n = self._known_n_cells(obs=obs)
+
+        dist_cur = abs(int(cell[0]) - int(current_pos[0])) + abs(int(cell[1]) - int(current_pos[1]))
+        frontier_touch = sum(1 for nb in self._neighbors4(cell) if nb in frontier)
+        n_touch = sum(1 for nb in self._neighbors4(cell) if nb in known_n)
+
+        score = 0.0
+        if closing_targets:
+            dist_closing = self._min_manhattan_distance(origin=cell, targets=closing_targets)
+            score += max(0.0, 2.4 - 0.8 * float(dist_closing))
+        if frontier:
+            dist_frontier = self._min_manhattan_distance(origin=cell, targets=list(frontier))
+            score += max(0.0, 1.2 - 0.35 * float(dist_frontier))
+        if goal_hints:
+            dist_goal = self._min_manhattan_distance(origin=cell, targets=goal_hints)
+            score += max(0.0, 0.8 - 0.12 * float(dist_goal))
+        score += 0.25 * float(frontier_touch)
+        score -= 0.08 * float(dist_cur)
+        score -= 0.55 * float(n_touch)
+        return score
+
+    def _build_comm_preference_scores(
+        self,
+        *,
+        task: Any,
+        obs: Mapping[str, Any],
+        agent_idx: int,
+        comm_options: Sequence[Mapping[str, Any]],
+    ) -> Optional[List[float]]:
+        if not comm_options:
+            return None
+        scores: List[float] = []
+        for option in comm_options:
+            discovered = option.get("discovered_pillars") or []
+            candidates = option.get("candidate_coords") or []
+            if not discovered and not candidates:
+                scores.append(0.0)
+                continue
+
+            score = 0.0
+            for fact in discovered:
+                if not isinstance(fact, Mapping):
+                    continue
+                coord = fact.get("coord")
+                if coord is None:
+                    x = fact.get("x")
+                    z = fact.get("z")
+                    if x is None or z is None:
+                        continue
+                    coord = [x, z]
+                if not isinstance(coord, (list, tuple)) or len(coord) < 2:
+                    continue
+                priority = max(
+                    0.0,
+                    self._coord_priority_score(
+                        task=task,
+                        obs=obs,
+                        agent_idx=agent_idx,
+                        coord=(int(coord[0]), int(coord[1])),
+                    ),
+                )
+                pillar_type = str(fact.get("type") or "")
+                if pillar_type == "Y":
+                    score += 1.4 + 0.45 * priority
+                elif pillar_type == "N":
+                    score += 0.9 + 0.30 * priority
+                else:
+                    score += 0.25 + 0.20 * priority
+
+            candidate_bonus = 0.0
+            for coord in list(candidates)[:4]:
+                if not isinstance(coord, (list, tuple)) or len(coord) < 2:
+                    continue
+                priority = max(
+                    0.0,
+                    self._coord_priority_score(
+                        task=task,
+                        obs=obs,
+                        agent_idx=agent_idx,
+                        coord=(int(coord[0]), int(coord[1])),
+                    ),
+                )
+                candidate_bonus += 0.2 + 0.35 * priority
+            score += candidate_bonus
+            scores.append(float(score))
+        return scores
+
+    def _build_probe_preference_scores(
+        self,
+        *,
+        task: Any,
+        obs: Mapping[str, Any],
+        agent_idx: int,
+        probe_options: Sequence[Sequence[Sequence[int]]],
+    ) -> Optional[List[float]]:
+        if not probe_options:
+            return None
+        scores: List[float] = []
+        for option in probe_options:
+            if not option:
+                scores.append(0.0)
+                continue
+            priority_sum = 0.0
+            for coord in option:
+                if not isinstance(coord, (list, tuple)) or len(coord) < 2:
+                    continue
+                priority_sum += max(
+                    0.0,
+                    self._coord_priority_score(
+                        task=task,
+                        obs=obs,
+                        agent_idx=agent_idx,
+                        coord=(int(coord[0]), int(coord[1])),
+                    ),
+                )
+            scores.append(float(priority_sum + 0.3 * float(len(option))))
+        return scores
+
     def _greedy_path(
         self,
         *,
@@ -597,6 +739,23 @@ class BridgeBuildAdapter:
             out["y"].extend(facts["y"])
             out["n"].extend(facts["n"])
             out["candidate"].extend(facts["candidate"])
+        return out
+
+    def _known_typed_cells(self, *, obs: Mapping[str, Any]) -> set[Coord]:
+        out: set[Coord] = set()
+        for item in obs.get("known_probe_results") or []:
+            if not isinstance(item, Mapping):
+                continue
+            coord = item.get("coord")
+            if not isinstance(coord, (list, tuple)) or len(coord) < 2:
+                continue
+            pillar_type = str(item.get("type") or "")
+            if pillar_type not in {"Y", "N"}:
+                continue
+            out.add((int(coord[0]), int(coord[1])))
+        facts = self._known_message_facts(obs=obs)
+        out.update((int(x), int(z)) for x, z in facts["y"])
+        out.update((int(x), int(z)) for x, z in facts["n"])
         return out
 
     def _known_candidate_cells(self, *, obs: Mapping[str, Any]) -> set[Coord]:
@@ -1399,10 +1558,14 @@ class BridgeBuildAdapter:
             target[self._belief_index(coord)] = 1.0
         return target
 
-    def _build_belief_mask(self, *, task: Any) -> torch.Tensor:
+    def _build_belief_mask(self, *, task: Any, obs: Mapping[str, Any]) -> torch.Tensor:
         mask = torch.zeros(self.belief_dim, dtype=torch.bool)
+        resolved = self._known_typed_cells(obs=obs)
         for coord in task.candidate_pillars:
-            mask[self._belief_index(coord)] = True
+            cell = (int(coord[0]), int(coord[1]))
+            if cell in resolved:
+                continue
+            mask[self._belief_index(cell)] = True
         return mask
 
     def _movement_target_anchors(self, *, task: Any, agent_idx: int) -> Sequence[Coord]:
