@@ -88,6 +88,10 @@ class BCMAACConfig:
     actor_prompt_context_scale: float = 1.0
     actor_response_context_scale: float = 0.15
     preference_loss_coef: float = 0.1
+    comm_preference_loss_scale: float = 0.35
+    probe_preference_loss_scale: float = 0.35
+    cmds_preference_loss_scale: float = 1.0
+    path_preference_loss_scale: float = 1.0
     score_chunk_size: int = 0
     actor_gradient_checkpointing: bool = False
 
@@ -112,6 +116,14 @@ class BCMAACConfig:
             raise ValueError("actor_response_context_scale must be >= 0.")
         if self.preference_loss_coef < 0.0:
             raise ValueError("preference_loss_coef must be >= 0.")
+        if self.comm_preference_loss_scale < 0.0:
+            raise ValueError("comm_preference_loss_scale must be >= 0.")
+        if self.probe_preference_loss_scale < 0.0:
+            raise ValueError("probe_preference_loss_scale must be >= 0.")
+        if self.cmds_preference_loss_scale < 0.0:
+            raise ValueError("cmds_preference_loss_scale must be >= 0.")
+        if self.path_preference_loss_scale < 0.0:
+            raise ValueError("path_preference_loss_scale must be >= 0.")
         if self.score_chunk_size < 0:
             raise ValueError("score_chunk_size must be >= 0.")
 
@@ -467,21 +479,24 @@ class BCMAACTrainer:
                 value_loss_turn = (value - ret).pow(2).mean()
 
                 actor_turn_loss_values: List[float] = []
+                actor_turn_loss_tensors: List[torch.Tensor] = []
                 entropy_turn_values: List[float] = []
                 adv_value = float(normalized_advantages[traj_idx][turn_idx])
                 num_actor_terms = max(1, self.args.num_agents)
                 for agent_idx in range(self.args.num_agents):
                     actor_device = self.agent_devices[agent_idx]
                     prompt_tokens = turn.sequences[agent_idx][: int(turn.prompt_lens[agent_idx])].unsqueeze(0).to(actor_device)
-                    actor_loss_value, entropy_value, preference_loss_value = self._backprop_action_traces(
+                    actor_loss_tensor, actor_loss_value, entropy_value, preference_loss_value = self._compute_action_trace_loss(
                         model=self.agents[agent_idx],
                         tokenizer=self.agent_tokenizers[agent_idx],
                         prompt_tokens=prompt_tokens,
                         action_traces=turn.action_traces[agent_idx],
-                        context_vec=contexts[agent_idx].detach(),
+                        context_vec=contexts[agent_idx],
                         advantage=float(adv_value),
                         loss_scale=float(total_turns) * float(num_actor_terms),
                     )
+                    if actor_loss_tensor is not None:
+                        actor_turn_loss_tensors.append(actor_loss_tensor)
                     actor_turn_loss_values.append(float(actor_loss_value))
                     entropy_turn_values.append(float(entropy_value))
                     per_turn_preference_loss[turn_idx].append(float(preference_loss_value))
@@ -501,7 +516,11 @@ class BCMAACTrainer:
                     self.args.value_loss_coef * value_loss_turn
                     + self.args.task_loss_coef * belief_loss_turn
                 ) / float(total_turns)
-                shared_turn_loss.backward()
+                backprop_roots: List[torch.Tensor] = [shared_turn_loss]
+                backprop_roots.extend(actor_turn_loss_tensors)
+                if backprop_roots:
+                    # Backpropagate once so actor gradients can shape the context encoder.
+                    torch.autograd.backward(backprop_roots)
 
                 actor_loss_turn = (
                     sum(actor_turn_loss_values) / float(len(actor_turn_loss_values))
@@ -816,7 +835,7 @@ class BCMAACTrainer:
             return torch.argmax(probs, dim=-1)
         return torch.multinomial(probs, num_samples=1).squeeze(-1)
 
-    def _backprop_action_traces(
+    def _compute_action_trace_loss(
         self,
         *,
         model: CausalLMWithContextValueHead,
@@ -826,13 +845,14 @@ class BCMAACTrainer:
         context_vec: torch.Tensor,
         advantage: float,
         loss_scale: float,
-    ) -> Tuple[float, float, float]:
+    ) -> Tuple[Optional[torch.Tensor], float, float, float]:
         if not action_traces:
-            return 0.0, 0.0, 0.0
+            return None, 0.0, 0.0, 0.0
         model_device = self._module_device(model)
         prompt_tokens = prompt_tokens.to(model_device)
-        context_vec = context_vec.to(model_device).detach()
+        context_vec = context_vec.to(model_device)
         advantage_tensor = torch.tensor(float(advantage), device=model_device, dtype=torch.float32)
+        total_scaled_loss: Optional[torch.Tensor] = None
         total_actor_loss = 0.0
         entropy_values: List[float] = []
         preference_values: List[float] = []
@@ -857,19 +877,24 @@ class BCMAACTrainer:
                 log_probs=log_probs,
                 trace=trace,
             )
+            preference_coef = self._preference_loss_coef_for_field(trace.field_name)
             scaled_trace_loss = (
                 trace_loss
-                + float(self.args.preference_loss_coef) * preference_loss
+                + preference_coef * preference_loss
                 - float(self.args.entropy_coef) * (trace_entropy / float(num_traces))
             ) / max(float(loss_scale), 1.0)
-            scaled_trace_loss.backward()
+            total_scaled_loss = (
+                scaled_trace_loss
+                if total_scaled_loss is None
+                else total_scaled_loss + scaled_trace_loss
+            )
             total_actor_loss += float(trace_loss.detach().item())
             entropy_values.append(float(trace_entropy.detach().item()))
             preference_values.append(float(preference_loss.detach().item()))
 
         entropy_mean = float(sum(entropy_values) / len(entropy_values)) if entropy_values else 0.0
         preference_mean = float(sum(preference_values) / len(preference_values)) if preference_values else 0.0
-        return total_actor_loss, entropy_mean, preference_mean
+        return total_scaled_loss, total_actor_loss, entropy_mean, preference_mean
 
     def _sequence_logprob(
         self,
@@ -1028,6 +1053,16 @@ class BCMAACTrainer:
             return torch.zeros((), device=log_probs.device, dtype=log_probs.dtype)
         target_probs = torch.softmax(pref_tensor, dim=-1)
         return -(target_probs * log_probs).sum()
+
+    def _preference_loss_coef_for_field(self, field_name: str) -> float:
+        field = str(field_name or "").strip().lower()
+        field_scales = {
+            "comm": float(self.args.comm_preference_loss_scale),
+            "probe": float(self.args.probe_preference_loss_scale),
+            "cmds": float(self.args.cmds_preference_loss_scale),
+            "path": float(self.args.path_preference_loss_scale),
+        }
+        return float(self.args.preference_loss_coef) * field_scales.get(field, 1.0)
 
     def _score_constrained_candidates(
         self,

@@ -189,6 +189,7 @@ class BridgeBuildBaselineTrainer(BCMAACTrainer):
                 value_loss_turn = (value - ret).pow(2).mean()
 
                 actor_turn_loss_values: List[float] = []
+                actor_turn_loss_tensors: List[torch.Tensor] = []
                 entropy_turn_values: List[float] = []
                 adv_value = float(normalized_advantages[traj_idx][turn_idx])
                 num_actor_terms = max(1, self.args.num_agents)
@@ -200,7 +201,7 @@ class BridgeBuildBaselineTrainer(BCMAACTrainer):
                         device=actor_device,
                         dtype=critic_contexts[agent_idx].dtype,
                     )
-                    actor_loss_value, entropy_value, preference_loss_value = self._backprop_action_traces(
+                    actor_loss_tensor, actor_loss_value, entropy_value, preference_loss_value = self._compute_action_trace_loss(
                         model=self.agents[agent_idx],
                         tokenizer=self.agent_tokenizers[agent_idx],
                         prompt_tokens=prompt_tokens,
@@ -209,13 +210,18 @@ class BridgeBuildBaselineTrainer(BCMAACTrainer):
                         advantage=float(adv_value),
                         loss_scale=float(total_turns) * float(num_actor_terms),
                     )
+                    if actor_loss_tensor is not None:
+                        actor_turn_loss_tensors.append(actor_loss_tensor)
                     actor_turn_loss_values.append(float(actor_loss_value))
                     entropy_turn_values.append(float(entropy_value))
                     per_turn_preference_loss[turn_idx].append(float(preference_loss_value))
                     extra_loss_accum["preference_loss"] += float(preference_loss_value)
 
                 shared_turn_loss = (self.args.value_loss_coef * value_loss_turn) / float(total_turns)
-                shared_turn_loss.backward()
+                backprop_roots: List[torch.Tensor] = [shared_turn_loss]
+                backprop_roots.extend(actor_turn_loss_tensors)
+                if backprop_roots:
+                    torch.autograd.backward(backprop_roots)
 
                 actor_loss_turn = (
                     sum(actor_turn_loss_values) / float(len(actor_turn_loss_values))

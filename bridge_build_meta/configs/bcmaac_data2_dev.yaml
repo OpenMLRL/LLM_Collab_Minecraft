@@ -82,6 +82,10 @@ meta:
   actor_prompt_context_scale: 1.0
   actor_response_context_scale: 0.15
   preference_loss_coef: 0.1
+  comm_preference_loss_scale: 0.35
+  probe_preference_loss_scale: 0.35
+  cmds_preference_loss_scale: 1.0
+  path_preference_loss_scale: 1.0
   score_chunk_size: 2
   actor_gradient_checkpointing: true
 

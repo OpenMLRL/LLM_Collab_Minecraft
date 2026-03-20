@@ -212,6 +212,10 @@ def _build_bcmaac_config(cfg: Dict[str, Any]) -> BCMAACConfig:
         actor_prompt_context_scale=float(meta_cfg.get("actor_prompt_context_scale", 1.0)),
         actor_response_context_scale=float(meta_cfg.get("actor_response_context_scale", 0.15)),
         preference_loss_coef=float(meta_cfg.get("preference_loss_coef", 0.1)),
+        comm_preference_loss_scale=float(meta_cfg.get("comm_preference_loss_scale", 0.35)),
+        probe_preference_loss_scale=float(meta_cfg.get("probe_preference_loss_scale", 0.35)),
+        cmds_preference_loss_scale=float(meta_cfg.get("cmds_preference_loss_scale", 1.0)),
+        path_preference_loss_scale=float(meta_cfg.get("path_preference_loss_scale", 1.0)),
         score_chunk_size=int(meta_cfg.get("score_chunk_size", 0)),
         actor_gradient_checkpointing=bool(meta_cfg.get("actor_gradient_checkpointing", False)),
     )
