@@ -19,8 +19,8 @@ debug: true
 dataset:
   name: bridge_build
   type: bridge_build
-  train_split: '[:9]'
-  eval_split: '[:9]'
+  train_split: '[:6]'
+  eval_split: '[6:]'
   json_path: ../../bridge_build/dataset/data.json
 
 prompt:
@@ -95,7 +95,7 @@ reward_processor:
 wandb:
   project: bridge_build_baseline
   entity: OpenMLRL
-  run_name: bridge_build_baseline_data9
+  run_name: bridge_build_baseline_data
   dir: output_bridge_build_baseline_full
   tags:
   - bcmaac

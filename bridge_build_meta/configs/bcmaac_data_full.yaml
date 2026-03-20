@@ -19,8 +19,8 @@ debug: true
 dataset:
   name: bridge_build
   type: bridge_build
-  train_split: '[:9]'
-  eval_split: '[:9]'
+  train_split: '[:6]'
+  eval_split: '[6:]'
   json_path: ../../bridge_build/dataset/data.json
 
 prompt:
@@ -55,8 +55,8 @@ bcmaac:
   num_turns: 4
   critic_type: v
   num_train_epochs: 150
-  agent_learning_rate: 2.5e-6
-  critic_learning_rate: 2.5e-6
+  agent_learning_rate: 3.5e-6
+  critic_learning_rate: 3.5e-6
   rollout_buffer_size: 8
   train_batch_size: 4
   value_loss_coef: 0.6
@@ -102,7 +102,7 @@ reward_processor:
 wandb:
   project: bridge_build_meta
   entity: OpenMLRL
-  run_name: bridge_build_bcmaac_data9
+  run_name: bridge_build_bcmaac_data
   dir: output_bcmaac_bridge_build_full
   tags:
   - bcmaac
