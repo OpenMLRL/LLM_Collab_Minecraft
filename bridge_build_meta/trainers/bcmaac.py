@@ -94,6 +94,9 @@ class BCMAACConfig:
     path_preference_loss_scale: float = 1.0
     score_chunk_size: int = 0
     actor_gradient_checkpointing: bool = False
+    best_model_metric: Optional[str] = None
+    best_model_mode: str = "max"
+    best_model_dir: Optional[str] = None
 
     def __post_init__(self) -> None:
         if self.num_agents < 1:
@@ -126,6 +129,8 @@ class BCMAACConfig:
             raise ValueError("path_preference_loss_scale must be >= 0.")
         if self.score_chunk_size < 0:
             raise ValueError("score_chunk_size must be >= 0.")
+        if self.best_model_mode not in ("max", "min"):
+            raise ValueError("best_model_mode must be 'max' or 'min'.")
 
 
 @dataclass
@@ -250,6 +255,9 @@ class BCMAACTrainer:
             self._init_wandb()
 
     def train(self) -> None:
+        best_metric_name = str(self.args.best_model_metric or "").strip()
+        best_metric_mode = str(self.args.best_model_mode or "max").strip().lower()
+        best_metric_value: Optional[float] = None
         for epoch in range(self.args.num_train_epochs):
             items = list(self.train_items)
             random.shuffle(items)
@@ -279,6 +287,25 @@ class BCMAACTrainer:
                 if self.verbose:
                     print(f"Eval @ epoch {epoch + 1}: {eval_summary}")
                 self._log_metrics(eval_summary)
+                if best_metric_name and self.args.best_model_dir:
+                    metric_value = eval_summary.get(best_metric_name)
+                    if metric_value is not None:
+                        metric_value = float(metric_value)
+                        improved = best_metric_value is None
+                        if best_metric_value is not None:
+                            if best_metric_mode == "max":
+                                improved = metric_value > best_metric_value
+                            else:
+                                improved = metric_value < best_metric_value
+                        if improved:
+                            best_metric_value = metric_value
+                            self.save_model(str(self.args.best_model_dir))
+                            if self.verbose:
+                                print(
+                                    f"Saved best model @ epoch {epoch + 1} "
+                                    f"({best_metric_name}={metric_value:.6f}) "
+                                    f"to {self.args.best_model_dir}"
+                                )
 
     def evaluate(self) -> Dict[str, float]:
         max_items = min(len(self.eval_items), max(1, int(self.args.eval_num_samples)))

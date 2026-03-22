@@ -179,6 +179,18 @@ def _build_bcmaac_config(cfg: Dict[str, Any]) -> BCMAACConfig:
     meta_cfg = cfg.get("meta") or {}
     if not isinstance(meta_cfg, dict):
         meta_cfg = {}
+    output_cfg = cfg.get("output") or {}
+    if not isinstance(output_cfg, dict):
+        output_cfg = {}
+    save_best_model = bool(output_cfg.get("save_best_model", False))
+    best_model_dir = None
+    if save_best_model:
+        best_model_path = output_cfg.get("best_model_path")
+        if best_model_path:
+            best_model_dir = os.path.abspath(str(best_model_path))
+        else:
+            base_dir = os.path.abspath(str(output_cfg.get("base_dir") or "."))
+            best_model_dir = os.path.join(base_dir, "best_model")
     return BCMAACConfig(
         agent_learning_rate=float(trainer_cfg.get("agent_learning_rate", 2.5e-6)),
         critic_learning_rate=float(trainer_cfg.get("critic_learning_rate", 2.5e-6)),
@@ -218,6 +230,13 @@ def _build_bcmaac_config(cfg: Dict[str, Any]) -> BCMAACConfig:
         path_preference_loss_scale=float(meta_cfg.get("path_preference_loss_scale", 1.0)),
         score_chunk_size=int(meta_cfg.get("score_chunk_size", 0)),
         actor_gradient_checkpointing=bool(meta_cfg.get("actor_gradient_checkpointing", False)),
+        best_model_metric=(
+            str(output_cfg.get("best_metric", "eval/turn_4/expected_return")).strip()
+            if save_best_model
+            else None
+        ),
+        best_model_mode=str(output_cfg.get("best_metric_mode", "max")).strip().lower(),
+        best_model_dir=best_model_dir,
     )
 
 
