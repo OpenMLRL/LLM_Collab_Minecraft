@@ -182,6 +182,18 @@ def _build_baseline_config(cfg: Dict[str, Any]) -> BridgeBuildBaselineConfig:
     baseline_cfg = cfg.get("baseline") or cfg.get("meta") or {}
     if not isinstance(baseline_cfg, dict):
         baseline_cfg = {}
+    output_cfg = cfg.get("output") or {}
+    if not isinstance(output_cfg, dict):
+        output_cfg = {}
+    save_best_model = bool(output_cfg.get("save_best_model", False))
+    best_model_dir = None
+    if save_best_model:
+        best_model_path = output_cfg.get("best_model_path")
+        if best_model_path:
+            best_model_dir = os.path.abspath(str(best_model_path))
+        else:
+            base_dir = os.path.abspath(str(output_cfg.get("base_dir") or "."))
+            best_model_dir = os.path.join(base_dir, "best_model")
     return BridgeBuildBaselineConfig(
         agent_learning_rate=float(trainer_cfg.get("agent_learning_rate", 2.5e-6)),
         critic_learning_rate=float(trainer_cfg.get("critic_learning_rate", 2.5e-6)),
@@ -215,8 +227,19 @@ def _build_baseline_config(cfg: Dict[str, Any]) -> BridgeBuildBaselineConfig:
         actor_prompt_context_scale=0.0,
         actor_response_context_scale=0.0,
         preference_loss_coef=float(baseline_cfg.get("preference_loss_coef", 0.1)),
+        comm_preference_loss_scale=float(baseline_cfg.get("comm_preference_loss_scale", 0.35)),
+        probe_preference_loss_scale=float(baseline_cfg.get("probe_preference_loss_scale", 0.35)),
+        cmds_preference_loss_scale=float(baseline_cfg.get("cmds_preference_loss_scale", 1.0)),
+        path_preference_loss_scale=float(baseline_cfg.get("path_preference_loss_scale", 1.0)),
         score_chunk_size=int(baseline_cfg.get("score_chunk_size", 0)),
         actor_gradient_checkpointing=bool(baseline_cfg.get("actor_gradient_checkpointing", False)),
+        best_model_metric=(
+            str(output_cfg.get("best_metric", "eval/turn_4/expected_return")).strip()
+            if save_best_model
+            else None
+        ),
+        best_model_mode=str(output_cfg.get("best_metric_mode", "max")).strip().lower(),
+        best_model_dir=best_model_dir,
     )
 
 

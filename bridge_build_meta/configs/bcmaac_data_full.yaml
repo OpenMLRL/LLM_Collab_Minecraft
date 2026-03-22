@@ -1,7 +1,7 @@
 agent_model:
   name: Qwen/Qwen3-4B-Instruct-2507
   type: qwen
-  temperature: 0.6
+  temperature: 0.5
   top_p: 0.6
   top_k: null
   max_length: 2048
@@ -59,8 +59,8 @@ bcmaac:
   num_turns: 4
   critic_type: v
   num_train_epochs: 180
-  agent_learning_rate: 2e-6
-  critic_learning_rate: 2e-6
+  agent_learning_rate: 2.5e-6
+  critic_learning_rate: 2.5e-6
   rollout_buffer_size: 8
   train_batch_size: 4
   value_loss_coef: 0.6
