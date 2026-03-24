@@ -91,8 +91,10 @@ baseline:
   actor_gradient_checkpointing: true
 
 reward_shaping:
-  n_adjacent_penalty_scale: 1.5
+  n_adjacent_penalty_scale: 2.25
   cc_merge_bonus_scale: 0.5
+  y_connected_bonus_scale: 0.7
+  terminal_clean_bonus_scale: 2.0
   move_progress_bonus_total: 2.5
 
 reward_processor:

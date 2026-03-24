@@ -58,7 +58,7 @@ bcmaac:
   num_agents: 2
   num_turns: 4
   critic_type: v
-  num_train_epochs: 180
+  num_train_epochs: 250
   agent_learning_rate: 2.5e-6
   critic_learning_rate: 2.5e-6
   rollout_buffer_size: 8
@@ -94,8 +94,10 @@ meta:
   actor_gradient_checkpointing: true
 
 reward_shaping:
-  n_adjacent_penalty_scale: 1.5
+  n_adjacent_penalty_scale: 2.25
   cc_merge_bonus_scale: 0.5
+  y_connected_bonus_scale: 0.7
+  terminal_clean_bonus_scale: 2.0
   move_progress_bonus_total: 2.5
 
 reward_processor:

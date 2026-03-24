@@ -32,6 +32,7 @@ _ENV_METRIC_KEYS: Tuple[str, ...] = (
     "bonus_gap_st",
     "bonus_cc_merge",
     "bonus_y_connected",
+    "bonus_terminal_clean",
     "penalty_n_adjacent",
     "penalty_block_cost",
     "bonus_terminal_connect",
@@ -258,6 +259,43 @@ class BCMAACTrainer:
         best_metric_name = str(self.args.best_model_metric or "").strip()
         best_metric_mode = str(self.args.best_model_mode or "max").strip().lower()
         best_metric_value: Optional[float] = None
+
+        def _handle_eval(eval_summary: Mapping[str, float], *, epoch: Optional[int], step: Optional[int] = None) -> None:
+            nonlocal best_metric_value
+            if self.verbose:
+                if epoch is None:
+                    print(f"Initial eval: {dict(eval_summary)}")
+                else:
+                    print(f"Eval @ epoch {epoch}: {dict(eval_summary)}")
+            self._log_metrics(eval_summary, step=step)
+            if not best_metric_name or not self.args.best_model_dir:
+                return
+            metric_value = eval_summary.get(best_metric_name)
+            if metric_value is None:
+                return
+            metric_value = float(metric_value)
+            improved = best_metric_value is None
+            if best_metric_value is not None:
+                if best_metric_mode == "max":
+                    improved = metric_value > best_metric_value
+                else:
+                    improved = metric_value < best_metric_value
+            if not improved:
+                return
+            best_metric_value = metric_value
+            self.save_model(str(self.args.best_model_dir))
+            if self.verbose:
+                label = "initial eval" if epoch is None else f"epoch {epoch}"
+                print(
+                    f"Saved best model @ {label} "
+                    f"({best_metric_name}={metric_value:.6f}) "
+                    f"to {self.args.best_model_dir}"
+                )
+
+        if self.eval_items:
+            initial_eval_summary = self.evaluate()
+            _handle_eval(initial_eval_summary, epoch=None, step=0)
+
         for epoch in range(self.args.num_train_epochs):
             items = list(self.train_items)
             random.shuffle(items)
@@ -284,37 +322,20 @@ class BCMAACTrainer:
 
             if self.eval_items and self.args.eval_interval > 0 and (epoch + 1) % self.args.eval_interval == 0:
                 eval_summary = self.evaluate()
-                if self.verbose:
-                    print(f"Eval @ epoch {epoch + 1}: {eval_summary}")
-                self._log_metrics(eval_summary)
-                if best_metric_name and self.args.best_model_dir:
-                    metric_value = eval_summary.get(best_metric_name)
-                    if metric_value is not None:
-                        metric_value = float(metric_value)
-                        improved = best_metric_value is None
-                        if best_metric_value is not None:
-                            if best_metric_mode == "max":
-                                improved = metric_value > best_metric_value
-                            else:
-                                improved = metric_value < best_metric_value
-                        if improved:
-                            best_metric_value = metric_value
-                            self.save_model(str(self.args.best_model_dir))
-                            if self.verbose:
-                                print(
-                                    f"Saved best model @ epoch {epoch + 1} "
-                                    f"({best_metric_name}={metric_value:.6f}) "
-                                    f"to {self.args.best_model_dir}"
-                                )
+                _handle_eval(eval_summary, epoch=epoch + 1)
 
     def evaluate(self) -> Dict[str, float]:
         max_items = min(len(self.eval_items), max(1, int(self.args.eval_num_samples)))
         if max_items <= 0:
             return {}
+        saved_env_step = self.env_step
         trajectories: List[EpisodeTrajectory] = []
-        for item in self.eval_items[:max_items]:
-            trajectory = self._collect_episode(item, training=False)
-            trajectories.append(trajectory)
+        try:
+            for item in self.eval_items[:max_items]:
+                trajectory = self._collect_episode(item, training=False)
+                trajectories.append(trajectory)
+        finally:
+            self.env_step = saved_env_step
         _advantages, rollout_metrics = self._compute_rollout_statistics(trajectories)
         flat = self._flatten_turn_metrics(rollout_metrics)
         return {f"eval/{key}": value for key, value in flat.items()}
@@ -1429,12 +1450,13 @@ class BCMAACTrainer:
             if self._should_log_train():
                 self._log_metrics(update_metrics)
 
-    def _log_metrics(self, metrics: Mapping[str, float]) -> None:
+    def _log_metrics(self, metrics: Mapping[str, float], *, step: Optional[int] = None) -> None:
         if not metrics:
             return
         if not self.wandb_initialized or wandb is None:
             return
-        wandb.log(dict(metrics), step=self.env_step)
+        log_step = self.env_step if step is None else int(step)
+        wandb.log(dict(metrics), step=log_step)
 
     def _should_log_train(self) -> bool:
         interval = int(getattr(self.args, "logging_steps", 1))

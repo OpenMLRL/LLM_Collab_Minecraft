@@ -98,6 +98,8 @@ class BridgeBuildAdapter:
         reward_cfg = dict(reward_config or {})
         self.n_adjacent_penalty_scale = float(reward_cfg.get("n_adjacent_penalty_scale", 1.5))
         self.cc_merge_bonus_scale = float(reward_cfg.get("cc_merge_bonus_scale", 0.5))
+        self.y_connected_bonus_scale = float(reward_cfg.get("y_connected_bonus_scale", 1.0))
+        self.terminal_clean_bonus_scale = float(reward_cfg.get("terminal_clean_bonus_scale", 0.0))
         self.move_progress_bonus_total = float(reward_cfg.get("move_progress_bonus_total", 2.5))
 
     @property
@@ -1610,10 +1612,27 @@ class BridgeBuildAdapter:
         metrics["bonus_cc_merge"] = adjusted_cc_merge
         reward += adjusted_cc_merge - base_cc_merge
 
+        base_y_connected = float(metrics.get("bonus_y_connected", 0.0))
+        adjusted_y_connected = base_y_connected * self.y_connected_bonus_scale
+        metrics["bonus_y_connected"] = adjusted_y_connected
+        reward += adjusted_y_connected - base_y_connected
+
         base_penalty = float(metrics.get("penalty_n_adjacent", 0.0))
         adjusted_penalty = base_penalty * self.n_adjacent_penalty_scale
         metrics["penalty_n_adjacent"] = adjusted_penalty
         reward -= adjusted_penalty - base_penalty
+
+        terminal_clean_bonus = 0.0
+        if self.terminal_clean_bonus_scale > 0.0 and bool(metrics.get("connected", False)):
+            total_n = max(
+                1,
+                int(metrics.get("total_false_pillars", 0)) or len(getattr(task, "false_pillars", ()) or ()),
+            )
+            n_adjacent_count = max(0.0, float(metrics.get("n_adjacent_count", 0.0)))
+            clean_ratio = max(0.0, 1.0 - (n_adjacent_count / float(total_n)))
+            terminal_clean_bonus = self.terminal_clean_bonus_scale * clean_ratio
+            reward += terminal_clean_bonus
+        metrics["bonus_terminal_clean"] = float(terminal_clean_bonus)
 
         prev_distances = self._movement_distances(task=task, state=prev_state)
         next_distances = self._movement_distances(task=task, state=next_state)

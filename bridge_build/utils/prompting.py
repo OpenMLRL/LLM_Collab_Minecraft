@@ -67,11 +67,12 @@ Action format and budgets:
 Reward/penalty rules (resolved each turn):
 - Gap improvement reward: `5 * (prev_gap_ST - gap_ST) / max_gap_ST`, where `gap_ST` is the minimum number of additional filled blocks needed to make anchor U and anchor V 4-connected under the current map, `prev_gap_ST` is the same quantity before this turn, and `max_gap_ST` is the same quantity on the initial empty map for this task.
 - CC merge reward: `1.5 * new_merge / (initial_cc_components - 1)`, where CC components are the 4-connected components formed by treating anchor U, anchor V, and all true Y pillars as special nodes, with filled blocks `*` allowed to connect them.
-- Reward for newly connected Y pillars: `(new_connected_Y / total_Y) * 5`, where a Y counts as connected when it is 4-connected to anchor U or anchor V through filled blocks `*` and/or other Y pillars.
-- Penalty for newly adjacent N pillars: `(new_adjacent_N / total_N) * 12`, where an N is adjacent if any filled block `*` is 4-neighbor adjacent to it.
+- Reward for newly connected Y pillars may be downweighted by shaping, so treat it as helpful but secondary to reducing gap and finishing a clean bridge. A Y counts as connected when it is 4-connected to anchor U or anchor V through filled blocks `*` and/or other Y pillars.
+- Penalty for newly adjacent N pillars is strong and may be amplified further by shaping. Avoid creating any new N adjacency.
 - Block placement cost: `(newly_placed_blocks / total_placeable_cells) * 5`.
 - Movement shaping bonus: `2.5 * (prev_target_distance_total - target_distance_total) / movement_distance_norm`, where worker A is rewarded for moving along the `S -> T` direction and worker B along the `T -> S` direction.
 - Terminal connect reward: `+2` when anchor U and anchor V become 4-connected through filled blocks `*` and/or pillars (`Y`/`N`), not through static land `#`.
+- Additional clean-terminal bonus may be awarded when S/T becomes connected with few N-adjacent conflicts remaining.
 
 Execution rules:
 - Termination condition: turn limit reached or anchor U and anchor V are already connected.
