@@ -101,6 +101,11 @@ class BridgeBuildAdapter:
         self.y_connected_bonus_scale = float(reward_cfg.get("y_connected_bonus_scale", 1.0))
         self.terminal_clean_bonus_scale = float(reward_cfg.get("terminal_clean_bonus_scale", 0.0))
         self.move_progress_bonus_total = float(reward_cfg.get("move_progress_bonus_total", 2.5))
+        self.late_quality_turn3_weight = float(reward_cfg.get("late_quality_turn3_weight", 0.0))
+        self.late_quality_turn4_weight = float(reward_cfg.get("late_quality_turn4_weight", 0.0))
+        self.late_quality_clean_scale = float(reward_cfg.get("late_quality_clean_scale", 0.0))
+        self.late_quality_compact_scale = float(reward_cfg.get("late_quality_compact_scale", 0.0))
+        self.late_quality_ready_scale = float(reward_cfg.get("late_quality_ready_scale", 0.0))
 
     @property
     def grid_channels(self) -> int:
@@ -1596,6 +1601,13 @@ class BridgeBuildAdapter:
     def _movement_distance_total(self, *, task: Any, state: Any) -> float:
         return float(sum(self._movement_distances(task=task, state=state)))
 
+    def _late_quality_weight(self, turn_index: int) -> float:
+        if turn_index >= 4:
+            return self.late_quality_turn4_weight
+        if turn_index >= 3:
+            return self.late_quality_turn3_weight
+        return 0.0
+
     def _adjust_reward_metrics(
         self,
         *,
@@ -1633,6 +1645,48 @@ class BridgeBuildAdapter:
             terminal_clean_bonus = self.terminal_clean_bonus_scale * clean_ratio
             reward += terminal_clean_bonus
         metrics["bonus_terminal_clean"] = float(terminal_clean_bonus)
+
+        turn_index = int(metrics.get("turn_index", getattr(prev_state, "turn_index", 1)) or 1)
+        late_quality_bonus = 0.0
+        late_clean_bonus = 0.0
+        late_compact_bonus = 0.0
+        late_ready_bonus = 0.0
+        late_weight = self._late_quality_weight(turn_index)
+        if late_weight > 0.0:
+            total_n = max(
+                1,
+                int(metrics.get("total_false_pillars", 0)) or len(getattr(task, "false_pillars", ()) or ()),
+            )
+            n_adjacent_count = max(0.0, float(metrics.get("n_adjacent_count", 0.0)))
+            clean_ratio = max(0.0, min(1.0, 1.0 - (n_adjacent_count / float(total_n))))
+
+            initial_cc = max(1.0, float(metrics.get("initial_cc_component_count", 1.0)))
+            cc_component_count = max(0.0, float(metrics.get("cc_component_count", 0.0)))
+            if initial_cc <= 2.0:
+                compact_ratio = 1.0
+            else:
+                compact_ratio = max(
+                    0.0,
+                    min(1.0, 1.0 - (max(0.0, cc_component_count - 2.0) / max(1.0, initial_cc - 2.0))),
+                )
+
+            gap_st_raw = metrics.get("gap_st")
+            max_gap_st = max(1.0, float(metrics.get("max_gap_st", 1.0)))
+            if gap_st_raw is None:
+                ready_ratio = 1.0 if bool(metrics.get("connected", False)) else 0.0
+            else:
+                ready_ratio = max(0.0, min(1.0, 1.0 - (float(gap_st_raw) / max_gap_st)))
+
+            late_clean_bonus = late_weight * self.late_quality_clean_scale * clean_ratio
+            late_compact_bonus = late_weight * self.late_quality_compact_scale * compact_ratio
+            late_ready_bonus = late_weight * self.late_quality_ready_scale * ready_ratio
+            late_quality_bonus = late_clean_bonus + late_compact_bonus + late_ready_bonus
+            reward += late_quality_bonus
+
+        metrics["bonus_late_quality"] = float(late_quality_bonus)
+        metrics["bonus_late_quality_clean"] = float(late_clean_bonus)
+        metrics["bonus_late_quality_compact"] = float(late_compact_bonus)
+        metrics["bonus_late_quality_ready"] = float(late_ready_bonus)
 
         prev_distances = self._movement_distances(task=task, state=prev_state)
         next_distances = self._movement_distances(task=task, state=next_state)

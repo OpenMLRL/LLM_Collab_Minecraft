@@ -45,6 +45,7 @@ def _build_feedback(metrics: Dict[str, Any], *, turn_number: int, agent_idx: int
             f"- penalty_block_cost: {float(metrics.get('penalty_block_cost', 0.0)):.4f}",
             f"- bonus_terminal_connect: {float(metrics.get('bonus_terminal_connect', 0.0)):.4f}",
             f"- bonus_terminal_clean: {float(metrics.get('bonus_terminal_clean', 0.0)):.4f}",
+            f"- bonus_late_quality: {float(metrics.get('bonus_late_quality', 0.0)):.4f}",
             f"- valid probes: {probe_cnt}",
             f"- comm tokens: {comm_tokens}",
             "- Target: gather information, avoid new N adjacency, connect more Y, then connect S/T.",

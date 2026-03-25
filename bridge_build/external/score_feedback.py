@@ -60,6 +60,7 @@ def format_followup_prompts(
             f"- penalty_block_cost: {float(metrics.get('penalty_block_cost', 0.0)):.4f}",
             f"- bonus_terminal_connect: {float(metrics.get('bonus_terminal_connect', 0.0)):.4f}",
             f"- bonus_terminal_clean: {float(metrics.get('bonus_terminal_clean', 0.0)):.4f}",
+            f"- bonus_late_quality: {float(metrics.get('bonus_late_quality', 0.0)):.4f}",
             f"- new_connected_y_count: {int(metrics.get('new_connected_y_count', 0))}",
             f"- new_adjacent_n_count: {int(metrics.get('new_adjacent_n_count', 0))}",
             f"- newly_placed_block_count: {int(metrics.get('newly_placed_block_count', 0))}",
