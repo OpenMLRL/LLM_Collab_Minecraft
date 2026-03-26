@@ -245,6 +245,7 @@ class ResourceGatheringAdapter:
                 state=state,
                 agent_idx=agent_idx,
                 current_pos=current_pos,
+                visible_resource_counts=obs["visible_resource_counts"],
             )
             comm_options, comm_scores = self._build_comm_options(
                 env=env,
@@ -326,6 +327,70 @@ class ResourceGatheringAdapter:
         env.current_state = copy.deepcopy(state)
         return env
 
+    def _manhattan(self, left: Coord, right: Coord) -> int:
+        return abs(int(left[0]) - int(right[0])) + abs(int(left[1]) - int(right[1]))
+
+    def _chebyshev(self, left: Coord, right: Coord) -> int:
+        return max(abs(int(left[0]) - int(right[0])), abs(int(left[1]) - int(right[1])))
+
+    def _rank_coords(self, *, coords: Sequence[Coord], origin: Coord) -> List[Coord]:
+        unique = {(int(coord[0]), int(coord[1])) for coord in coords}
+        return list(
+            sorted(
+                unique,
+                key=lambda coord: (
+                    self._chebyshev(origin, coord),
+                    self._manhattan(origin, coord),
+                    int(coord[1]),
+                    int(coord[0]),
+                ),
+            )
+        )
+
+    def _spread_coords(self, *, coords: Sequence[Coord], min_gap: int, limit: int) -> List[Coord]:
+        chosen: List[Coord] = []
+        for coord in coords:
+            item = (int(coord[0]), int(coord[1]))
+            if any(self._manhattan(item, existing) < int(min_gap) for existing in chosen):
+                continue
+            chosen.append(item)
+            if len(chosen) >= int(limit):
+                break
+        return chosen
+
+    def _path_prefix(self, path: Sequence[Sequence[int]], *, keep_steps: int) -> List[List[int]]:
+        if not path:
+            return []
+        keep_len = min(len(path), max(1, int(keep_steps) + 1))
+        return [[int(point[0]), int(point[1])] for point in path[:keep_len]]
+
+    def _resource_coord_groups(
+        self,
+        *,
+        env: NNResourceGatheringEnv,
+        task: Any,
+        state: Any,
+        agent_idx: int,
+        visible_resource_counts: Mapping[Coord, Any],
+    ) -> Tuple[List[Coord], List[Coord]]:
+        target_names = set(env._agent_target_resources(task=task, collected=state.collected, agent_idx=agent_idx))
+        target_coords: List[Coord] = []
+        distractor_coords: List[Coord] = []
+        for coord, counts in visible_resource_counts.items():
+            positive = [
+                resource_name
+                for resource_name in ("wood", "stone", "iron")
+                if env._resource_count(counts, resource_name) > 0
+            ]
+            if not positive:
+                continue
+            item = (int(coord[0]), int(coord[1]))
+            if target_names and any(name in target_names for name in positive):
+                target_coords.append(item)
+            else:
+                distractor_coords.append(item)
+        return target_coords, distractor_coords
+
     def _build_comm_options(
         self,
         *,
@@ -336,34 +401,65 @@ class ResourceGatheringAdapter:
         visible_resource_counts: Mapping[Coord, Any],
     ) -> Tuple[List[Dict[str, Any]], List[float]]:
         teammate_idx = 1 - int(agent_idx)
-        teammate_targets = env._agent_target_resources(task=task, collected=state.collected, agent_idx=teammate_idx)
-        facts: List[Tuple[float, Dict[str, Any]]] = []
+        teammate_targets = set(env._agent_target_resources(task=task, collected=state.collected, agent_idx=teammate_idx))
+        self_targets = set(env._agent_target_resources(task=task, collected=state.collected, agent_idx=agent_idx))
+        current_pos = tuple(int(v) for v in state.agent_positions[agent_idx])
+        useful_facts: List[Tuple[float, Dict[str, Any]]] = []
+        distractor_facts: List[Tuple[float, Dict[str, Any]]] = []
         for coord, counts in visible_resource_counts.items():
-            for resource_name in teammate_targets:
+            item = (int(coord[0]), int(coord[1]))
+            for resource_name in ("wood", "stone", "iron"):
                 count = env._resource_count(counts, resource_name)
                 if count <= 0:
                     continue
-                score = float(min(4, count))
-                facts.append(
-                    (
-                        score,
-                        {
-                            "x": int(coord[0]),
-                            "z": int(coord[1]),
-                            "type": str(resource_name),
-                            "count": int(count),
-                        },
-                    )
-                )
-        facts.sort(key=lambda item: (-item[0], item[1]["z"], item[1]["x"]))
+                fact = {
+                    "x": int(coord[0]),
+                    "z": int(coord[1]),
+                    "type": str(resource_name),
+                    "count": int(count),
+                }
+                base_score = float(min(4, count)) - 0.1 * float(self._manhattan(current_pos, item))
+                if resource_name in teammate_targets:
+                    useful_facts.append((base_score + 1.5, fact))
+                elif resource_name in self_targets:
+                    distractor_facts.append((base_score + 0.4, fact))
+                else:
+                    distractor_facts.append((base_score, fact))
+
+        useful_facts.sort(key=lambda item: (-item[0], item[1]["z"], item[1]["x"], item[1]["type"]))
+        distractor_facts.sort(key=lambda item: (-item[0], item[1]["z"], item[1]["x"], item[1]["type"]))
         options: List[Dict[str, Any]] = [{}]
         scores: List[float] = [0.0]
-        if facts:
-            options.append({"resource_facts": [facts[0][1]]})
-            scores.append(float(facts[0][0] + 0.5))
-        if len(facts) >= 2:
-            options.append({"resource_facts": [facts[0][1], facts[1][1]]})
-            scores.append(float(facts[0][0] + facts[1][0] + 0.5))
+
+        for score, fact in useful_facts[:2]:
+            options.append({"resource_facts": [fact]})
+            scores.append(float(max(0.1, score + 0.35)))
+        if len(useful_facts) >= 2:
+            options.append({"resource_facts": [useful_facts[0][1], useful_facts[1][1]]})
+            scores.append(float(max(0.2, useful_facts[0][0] + useful_facts[1][0] + 0.5)))
+        if len(useful_facts) >= 3:
+            options.append({"resource_facts": [useful_facts[-1][1]]})
+            scores.append(float(max(0.08, 0.2 + 0.15 * max(0.0, useful_facts[-1][0]))))
+            options.append({"resource_facts": [useful_facts[0][1], useful_facts[-1][1]]})
+            scores.append(float(max(0.12, useful_facts[0][0] + 0.1 * max(0.0, useful_facts[-1][0]))))
+
+        for score, fact in distractor_facts[:2]:
+            options.append({"resource_facts": [fact]})
+            scores.append(float(max(0.05, 0.25 + 0.2 * max(0.0, score))))
+        if len(distractor_facts) >= 2:
+            options.append({"resource_facts": [distractor_facts[0][1], distractor_facts[1][1]]})
+            scores.append(
+                float(
+                    max(
+                        0.1,
+                        0.35 + 0.15 * max(0.0, distractor_facts[0][0]) + 0.15 * max(0.0, distractor_facts[1][0]),
+                    )
+                )
+            )
+
+        if useful_facts and distractor_facts:
+            options.append({"resource_facts": [useful_facts[0][1], distractor_facts[0][1]]})
+            scores.append(float(max(0.15, useful_facts[0][0] + 0.15 * max(0.0, distractor_facts[0][0]))))
         return self._dedupe_options(options, scores)
 
     def _build_path_options(
@@ -374,22 +470,45 @@ class ResourceGatheringAdapter:
         state: Any,
         agent_idx: int,
         current_pos: Coord,
+        visible_resource_counts: Mapping[Coord, Any],
     ) -> List[List[List[int]]]:
         options: List[List[List[int]]] = [[[int(current_pos[0]), int(current_pos[1])]]]
         max_steps = max(1, int(self.prompt_ctx["max_path_len"]))
         zone = env._work_zone(task=task, state=state, agent_idx=agent_idx)
-        nearest_zone = env._nearest_zone_pos(origin=current_pos, zone=zone)
-        if nearest_zone is not None:
-            options.append(self._greedy_path(start=current_pos, target=nearest_zone, task=task, max_steps=max_steps))
+        ranked_zone = self._rank_coords(coords=list(zone), origin=current_pos)
+        if ranked_zone:
+            nearest_path = self._greedy_path(start=current_pos, target=ranked_zone[0], task=task, max_steps=max_steps)
+            options.append(nearest_path)
+            if len(nearest_path) > 2:
+                midpoint_steps = max(1, (len(nearest_path) - 1) // 2)
+                options.append(self._path_prefix(nearest_path, keep_steps=midpoint_steps))
+            for coord in self._spread_coords(coords=ranked_zone[1:], min_gap=2, limit=2):
+                options.append(self._greedy_path(start=current_pos, target=coord, task=task, max_steps=max_steps))
+
+        target_coords, distractor_coords = self._resource_coord_groups(
+            env=env,
+            task=task,
+            state=state,
+            agent_idx=agent_idx,
+            visible_resource_counts=visible_resource_counts,
+        )
+        for coord in self._rank_coords(coords=target_coords, origin=current_pos)[:2]:
+            options.append(self._greedy_path(start=current_pos, target=coord, task=task, max_steps=max_steps))
+
         message_maps = env._message_maps(state.inbox[agent_idx])
         target_names = env._agent_target_resources(task=task, collected=state.collected, agent_idx=agent_idx)
         hinted_coords: List[Coord] = []
         for name in target_names:
             for coord in message_maps.get(name, {}).keys():
                 hinted_coords.append((int(coord[0]), int(coord[1])))
-        hinted_coords = sorted(set(hinted_coords), key=lambda item: (abs(item[0] - current_pos[0]) + abs(item[1] - current_pos[1]), item[1], item[0]))
-        for coord in hinted_coords[:2]:
+        for coord in self._spread_coords(coords=self._rank_coords(coords=hinted_coords, origin=current_pos), min_gap=2, limit=2):
             options.append(self._greedy_path(start=current_pos, target=coord, task=task, max_steps=max_steps))
+
+        for coord in self._rank_coords(coords=distractor_coords, origin=current_pos)[:2]:
+            options.append(self._greedy_path(start=current_pos, target=coord, task=task, max_steps=max_steps))
+
+        center = (int(task.width // 2), int(task.height // 2))
+        options.append(self._greedy_path(start=current_pos, target=center, task=task, max_steps=max_steps))
         return self._dedupe_path_options(options)
 
     def _build_path_preference_scores(
