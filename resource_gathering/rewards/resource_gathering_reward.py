@@ -63,6 +63,7 @@ def get_reward_function(*, cfg: Dict[str, Any], num_agents: int) -> Callable[...
         task_cfg = {}
 
     view = max(0, int(task_cfg.get("view", 2)))
+    extraction_limit = max(0, int(task_cfg.get("extraction_limit", 2)))
     extraction_range = max(0, int(task_cfg.get("extraction_range", 2)))
     max_path_len = max(1, int(task_cfg.get("max_path_len", 4)))
     reward_config = _build_reward_config(cfg)
@@ -86,6 +87,7 @@ def get_reward_function(*, cfg: Dict[str, Any], num_agents: int) -> Callable[...
             state_before_turn=state,
             num_agents=n_agents,
             view=view,
+            extraction_limit=extraction_limit,
             extraction_range=extraction_range,
             max_path_len=max_path_len,
             system_prompt="",

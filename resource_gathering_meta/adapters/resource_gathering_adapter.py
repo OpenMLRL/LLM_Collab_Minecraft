@@ -50,7 +50,7 @@ class AgentMetaObservation:
 class AgentActionCandidates:
     comm_options: List[Dict[str, Any]]
     probe_options: List[List[List[int]]]
-    cmd_options: List[List[str]]
+    cmd_options: List[List[List[int]]]
     path_options: List[List[List[int]]]
     comm_preference_scores: Optional[List[float]] = None
     probe_preference_scores: Optional[List[float]] = None
@@ -88,6 +88,7 @@ class ResourceGatheringAdapter:
         self.max_height = max((int(task.height) for task in task_specs), default=1)
         self.reward_config = dict(reward_config or {})
         self.comm_limit = max(1, int(self.reward_config.get("comm_limit", self.prompt_ctx.get("comm_limit", 1))))
+        self.extraction_limit = max(0, int(self.reward_config.get("extraction_limit", self.prompt_ctx.get("extraction_limit", 1))))
 
     @property
     def grid_channels(self) -> int:
@@ -117,6 +118,7 @@ class ResourceGatheringAdapter:
             state_before_turn=state,
             num_agents=self.num_agents,
             view=int(self.prompt_ctx["view"]),
+            extraction_limit=int(self.prompt_ctx["extraction_limit"]),
             extraction_range=int(self.prompt_ctx["extraction_range"]),
             max_path_len=int(self.prompt_ctx["max_path_len"]),
             system_prompt=str(self.prompt_ctx["system_prompt"]),
@@ -239,6 +241,14 @@ class ResourceGatheringAdapter:
                 extraction_range=int(payload.get("extraction_range") or self.prompt_ctx["extraction_range"]),
             )
             current_pos = tuple(int(v) for v in obs["current_pos"])
+            cmd_options, cmd_scores = self._build_cmd_options(
+                env=env,
+                task=task,
+                state=state,
+                agent_idx=agent_idx,
+                current_pos=current_pos,
+                visible_resource_counts=obs["visible_resource_counts"],
+            )
             path_options = self._build_path_options(
                 env=env,
                 task=task,
@@ -265,11 +275,11 @@ class ResourceGatheringAdapter:
                 AgentActionCandidates(
                     comm_options=comm_options,
                     probe_options=[[]],
-                    cmd_options=[[]],
+                    cmd_options=cmd_options,
                     path_options=path_options,
                     comm_preference_scores=comm_scores,
                     probe_preference_scores=[0.0],
-                    cmd_preference_scores=[0.0],
+                    cmd_preference_scores=cmd_scores,
                     path_preference_scores=path_scores,
                 )
             )
@@ -309,7 +319,7 @@ class ResourceGatheringAdapter:
             num_agents=self.num_agents,
             view=int(payload.get("view") or self.prompt_ctx["view"]),
             max_turns=int(state.max_turns),
-            extraction_limit=0,
+            extraction_limit=int(payload.get("extraction_limit") or self.extraction_limit),
             extraction_range=int(payload.get("extraction_range") or self.prompt_ctx["extraction_range"]),
             path_slots=max(1, int(payload.get("max_path_len") or self.prompt_ctx["max_path_len"])),
             comm_limit=self.comm_limit,
@@ -317,7 +327,7 @@ class ResourceGatheringAdapter:
             terminal_bonus=float(self.reward_config.get("terminal_bonus", 4.0)),
             move_cost_scale=float(self.reward_config.get("move_cost_scale", 0.0)),
             comm_cost_scale=float(self.reward_config.get("comm_cost_scale", 0.0)),
-            wasted_extraction_penalty=0.0,
+            wasted_extraction_penalty=float(self.reward_config.get("wasted_extraction_penalty", 0.1)),
             move_to_zone_bonus_scale=float(self.reward_config.get("move_to_zone_bonus_scale", 0.05)),
             useful_comm_bonus_scale=float(self.reward_config.get("useful_comm_bonus_scale", 0.1)),
             first_enter_zone_bonus_scale=float(self.reward_config.get("first_enter_zone_bonus_scale", 0.15)),
@@ -391,6 +401,25 @@ class ResourceGatheringAdapter:
                 distractor_coords.append(item)
         return target_coords, distractor_coords
 
+    def _top_scored_coords(
+        self,
+        *,
+        score_map: Mapping[Coord, float],
+        origin: Coord,
+        limit: int,
+    ) -> List[Coord]:
+        ranked = sorted(
+            ((coord, float(score)) for coord, score in score_map.items()),
+            key=lambda item: (
+                -item[1],
+                self._chebyshev(origin, item[0]),
+                self._manhattan(origin, item[0]),
+                int(item[0][1]),
+                int(item[0][0]),
+            ),
+        )
+        return [coord for coord, _score in ranked[: max(0, int(limit))]]
+
     def _build_comm_options(
         self,
         *,
@@ -461,6 +490,83 @@ class ResourceGatheringAdapter:
             options.append({"resource_facts": [useful_facts[0][1], distractor_facts[0][1]]})
             scores.append(float(max(0.15, useful_facts[0][0] + 0.15 * max(0.0, distractor_facts[0][0]))))
         return self._dedupe_options(options, scores)
+
+    def _build_cmd_options(
+        self,
+        *,
+        env: NNResourceGatheringEnv,
+        task: Any,
+        state: Any,
+        agent_idx: int,
+        current_pos: Coord,
+        visible_resource_counts: Mapping[Coord, Any],
+    ) -> Tuple[List[List[List[int]]], List[float]]:
+        limit = max(0, int(self.extraction_limit))
+        if limit <= 0:
+            return ([[]], [0.0])
+
+        target_names = set(env._agent_target_resources(task=task, collected=state.collected, agent_idx=agent_idx))
+        message_maps = env._message_maps(state.inbox[agent_idx])
+        reach_now = set(env._extract_reach(current_pos))
+        visible_useful: Dict[Coord, float] = {}
+        hinted_useful: Dict[Coord, float] = {}
+        distractor: Dict[Coord, float] = {}
+
+        for coord, counts in visible_resource_counts.items():
+            item = (int(coord[0]), int(coord[1]))
+            for resource_name in ("wood", "stone", "iron"):
+                count = env._resource_count(counts, resource_name)
+                if count <= 0:
+                    continue
+                base = float(min(4, count)) - 0.08 * float(self._manhattan(current_pos, item))
+                if item in reach_now:
+                    base += 0.9
+                if resource_name in target_names:
+                    visible_useful[item] = visible_useful.get(item, 0.0) + base + 1.1
+                else:
+                    distractor[item] = distractor.get(item, 0.0) + max(0.05, base)
+
+        for resource_name, coord_map in message_maps.items():
+            for coord, count in coord_map.items():
+                item = (int(coord[0]), int(coord[1]))
+                base = float(min(4, int(count))) - 0.08 * float(self._manhattan(current_pos, item)) - 0.2
+                if item in reach_now:
+                    base += 0.4
+                if resource_name in target_names:
+                    hinted_useful[item] = hinted_useful.get(item, 0.0) + base + 0.9
+                else:
+                    distractor[item] = distractor.get(item, 0.0) + max(0.02, base - 0.1)
+
+        options: List[List[List[int]]] = [[]]
+        scores: List[float] = [0.0]
+
+        reachable_useful = {coord: score for coord, score in visible_useful.items() if coord in reach_now}
+        reachable_top = self._top_scored_coords(score_map=reachable_useful, origin=current_pos, limit=limit)
+        visible_top = self._top_scored_coords(score_map=visible_useful, origin=current_pos, limit=limit)
+        hinted_top = self._top_scored_coords(score_map=hinted_useful, origin=current_pos, limit=limit)
+        distractor_top = self._top_scored_coords(score_map=distractor, origin=current_pos, limit=limit)
+
+        if reachable_top:
+            options.append([[int(x), int(z)] for x, z in reachable_top])
+            scores.append(float(sum(reachable_useful[coord] for coord in reachable_top) + 0.6))
+        if visible_top:
+            options.append([[int(visible_top[0][0]), int(visible_top[0][1])]])
+            scores.append(float(visible_useful[visible_top[0]] + 0.45))
+            if len(visible_top) > 1:
+                options.append([[int(x), int(z)] for x, z in visible_top[:limit]])
+                scores.append(float(sum(visible_useful[coord] for coord in visible_top[:limit]) + 0.25))
+        if hinted_top:
+            options.append([[int(x), int(z)] for x, z in hinted_top[:limit]])
+            scores.append(float(sum(hinted_useful[coord] for coord in hinted_top[:limit]) + 0.15))
+        if distractor_top:
+            options.append([[int(distractor_top[0][0]), int(distractor_top[0][1])]])
+            scores.append(float(max(0.05, 0.25 + 0.2 * distractor[distractor_top[0]])))
+        if visible_top and distractor_top:
+            mixed = [visible_top[0], distractor_top[0]][:limit]
+            options.append([[int(x), int(z)] for x, z in mixed])
+            scores.append(float(max(0.08, visible_useful[visible_top[0]] + 0.1 * distractor[distractor_top[0]])))
+
+        return self._dedupe_cmd_options(options, scores)
 
     def _build_path_options(
         self,
@@ -570,6 +676,24 @@ class ResourceGatheringAdapter:
             seen.add(key)
             out.append(copy.deepcopy(list(option)))
         return out
+
+    def _dedupe_cmd_options(
+        self,
+        options: Sequence[Sequence[Sequence[int]]],
+        scores: Sequence[float],
+    ) -> Tuple[List[List[List[int]]], List[float]]:
+        out_options: List[List[List[int]]] = []
+        out_scores: List[float] = []
+        seen: set[str] = set()
+        for option, score in zip(options, scores):
+            normalized = [[int(coord[0]), int(coord[1])] for coord in option]
+            key = json.dumps(normalized, ensure_ascii=False, separators=(",", ":"))
+            if key in seen:
+                continue
+            seen.add(key)
+            out_options.append(normalized)
+            out_scores.append(float(score))
+        return out_options, out_scores
 
     def _render_prompt(self, *, system_prompt: str, user_prompt: str) -> str:
         tokenizer = self.tokenizer

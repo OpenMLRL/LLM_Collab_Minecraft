@@ -100,6 +100,7 @@ def _prepare_prompt_context(cfg: Dict[str, Any], *, num_agents: int) -> Dict[str
         "user_template_agent1": str(prompt_cfg.get("user_template_agent1") or prompt_cfg.get("user_template") or "").rstrip(),
         "user_template_agent2": str(prompt_cfg.get("user_template_agent2") or prompt_cfg.get("user_template") or "").rstrip(),
         "view": max(0, int(task_cfg.get("view", 2))),
+        "extraction_limit": max(0, int(task_cfg.get("extraction_limit", 2))),
         "extraction_range": max(0, int(task_cfg.get("extraction_range", 2))),
         "max_path_len": max(1, int(task_cfg.get("max_path_len", 4))),
         "comm_limit": max(1, int(task_cfg.get("comm_limit", 1))),
@@ -122,11 +123,13 @@ def _build_reward_config(cfg: Dict[str, Any]) -> Dict[str, float]:
         reward_cfg = {}
     return {
         "path_slots": int((cfg.get("task") or {}).get("max_path_len", 4)),
+        "extraction_limit": int((cfg.get("task") or {}).get("extraction_limit", 2)),
         "comm_limit": int((cfg.get("task") or {}).get("comm_limit", 1)),
         "progress_reward_scale": float(reward_cfg.get("progress_reward_scale", 10.0)),
         "terminal_bonus": float(reward_cfg.get("terminal_bonus", 4.0)),
         "move_cost_scale": float(reward_cfg.get("move_cost_scale", 0.0)),
         "comm_cost_scale": float(reward_cfg.get("comm_cost_scale", 0.0)),
+        "wasted_extraction_penalty": float(reward_cfg.get("wasted_extraction_penalty", 0.1)),
         "move_to_zone_bonus_scale": float(reward_cfg.get("move_to_zone_bonus_scale", 0.05)),
         "useful_comm_bonus_scale": float(reward_cfg.get("useful_comm_bonus_scale", 0.1)),
         "first_enter_zone_bonus_scale": float(reward_cfg.get("first_enter_zone_bonus_scale", 0.15)),

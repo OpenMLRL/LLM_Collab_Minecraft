@@ -13,7 +13,7 @@ DEFAULT_USER_TEMPLATE = """Output contract:
 - Reply with exactly one JSON object and nothing else.
 - If you do not want to broadcast, set "comm" to {{}}.
 - Set "probe" to [].
-- Set "cmds" to [].
+- Set "cmds" to [] if you do not want to extract this turn.
 - If you do not want to move, set "path" to [{current_pos}].
 - Minimal valid no-op example:
   {{"comm":{{}},"probe":[],"cmds":[],"path":[{current_pos}]}}
@@ -29,17 +29,19 @@ Task setup:
 
 Mechanics:
 - View radius: {view}.
-- After movement, you automatically harvest all compatible resources within Manhattan distance <= {extraction_range}.
-- You do NOT choose extraction cells manually in this version.
+- After movement, you may manually extract from up to {extraction_limit} cells.
+- A chosen extraction cell only works if it ends within Manhattan distance <= {extraction_range} of your final position.
+- Extraction is tool-specific: A only gets wood; B only gets stone and iron.
 - A valid path must start at your current position and move one 8-connected step at a time.
 - Maximum suggested path length this turn: {max_path_len} moves.
 
 Your current state:
 - Current position: {current_pos}
 - Visible resources: {visible_resources}
+- Reachable visible resources if you stay: {reachable_visible_resources}
 - Teammate position if visible: {visible_teammate_pos}
 - Received teammate messages: {received_messages}
-- Your reachable auto-harvest zone this turn if you stay: {harvest_zone}
+- Your extraction zone this turn if you stay: {harvest_zone}
 
 Action format:
 {{
@@ -49,14 +51,14 @@ Action format:
     ]
   }},
   "probe": [],
-  "cmds": [],
+  "cmds": [[x,z], ...],
   "path": [[x,z], ...]
 }}
 
 Action guidance:
 - `comm`: broadcast structured resource facts visible to you right now. Use {{}} for no message.
 - `probe`: always [] in this task.
-- `cmds`: always [] in this task.
+- `cmds`: extraction target cells to mine after movement. Use [] for no extraction.
 - `path`: first point must equal current position; use [{current_pos}] for no movement.
 - Prefer telling your teammate about resources they can harvest, not the ones you harvest yourself.
 

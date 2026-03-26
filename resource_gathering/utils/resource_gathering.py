@@ -155,7 +155,15 @@ def make_initial_state(task: ResourceTaskSpec, *, num_agents: int, max_turns: Op
         completed=False,
         terminated=False,
     )
-    env = _build_env(task=task, state=state, view=2, extraction_range=2, reward_config=None, debug=False)
+    env = _build_env(
+        task=task,
+        state=state,
+        view=2,
+        extraction_limit=0,
+        extraction_range=2,
+        reward_config=None,
+        debug=False,
+    )
     state.entered_work_zones = [
         env._is_in_work_zone(
             pos=state.agent_positions[agent_idx],
@@ -254,6 +262,7 @@ def _build_env(
     task: ResourceTaskSpec,
     state: ResourceGatheringState,
     view: int,
+    extraction_limit: int,
     extraction_range: int,
     reward_config: Optional[Mapping[str, Any]],
     debug: bool,
@@ -264,7 +273,7 @@ def _build_env(
         num_agents=len(state.agent_positions),
         view=int(view),
         max_turns=int(state.max_turns),
-        extraction_limit=0,
+        extraction_limit=max(0, int(extraction_limit)),
         extraction_range=int(extraction_range),
         path_slots=max(1, int(reward_cfg.get("path_slots", 4))),
         comm_limit=max(1, int(reward_cfg.get("comm_limit", 1))),
@@ -272,7 +281,7 @@ def _build_env(
         terminal_bonus=float(reward_cfg.get("terminal_bonus", 4.0)),
         move_cost_scale=float(reward_cfg.get("move_cost_scale", 0.0)),
         comm_cost_scale=float(reward_cfg.get("comm_cost_scale", 0.0)),
-        wasted_extraction_penalty=0.0,
+        wasted_extraction_penalty=float(reward_cfg.get("wasted_extraction_penalty", 0.1)),
         move_to_zone_bonus_scale=float(reward_cfg.get("move_to_zone_bonus_scale", 0.05)),
         useful_comm_bonus_scale=float(reward_cfg.get("useful_comm_bonus_scale", 0.1)),
         first_enter_zone_bonus_scale=float(reward_cfg.get("first_enter_zone_bonus_scale", 0.15)),
@@ -289,6 +298,7 @@ def build_payload(
     state_before_turn: ResourceGatheringState,
     num_agents: int,
     view: int,
+    extraction_limit: int,
     extraction_range: int,
     max_path_len: int,
     system_prompt: str,
@@ -302,6 +312,7 @@ def build_payload(
         "state_before_turn": serialize_state(state_before_turn),
         "num_agents": int(num_agents),
         "view": int(view),
+        "extraction_limit": max(0, int(extraction_limit)),
         "extraction_range": int(extraction_range),
         "max_path_len": int(max_path_len),
         "system_prompt": str(system_prompt or "").rstrip(),
@@ -340,6 +351,7 @@ def get_agent_observation(
         task=task,
         state=state,
         view=view,
+        extraction_limit=0,
         extraction_range=extraction_range,
         reward_config=None,
         debug=False,
@@ -361,6 +373,13 @@ def get_agent_observation(
         for coord, counts in sorted(visible_counts.items(), key=lambda item: (item[0][1], item[0][0]))
         if sum(int(v) for v in counts) > 0
     ]
+    harvest_zone = [[int(x), int(z)] for x, z in env._extract_reach(state.agent_positions[agent_idx])]
+    harvest_zone_set = {tuple(cell) for cell in harvest_zone}
+    reachable_visible_resources = [
+        dict(item)
+        for item in visible_resources
+        if tuple(int(v) for v in item["coord"]) in harvest_zone_set
+    ]
     teammate_idx = 1 - int(agent_idx)
     teammate_pos = state.agent_positions[teammate_idx]
     return {
@@ -372,7 +391,8 @@ def get_agent_observation(
         "visible": visible,
         "visible_teammate_pos": [int(teammate_pos[0]), int(teammate_pos[1])] if teammate_pos in visible else None,
         "received_messages": copy.deepcopy(state.inbox[agent_idx]),
-        "harvest_zone": [[int(x), int(z)] for x, z in env._extract_reach(state.agent_positions[agent_idx])],
+        "harvest_zone": harvest_zone,
+        "reachable_visible_resources": reachable_visible_resources,
     }
 
 
@@ -382,6 +402,7 @@ def build_prompt_fields(
     state: ResourceGatheringState,
     agent_idx: int,
     view: int,
+    extraction_limit: int,
     extraction_range: int,
     max_path_len: int,
     feedback: str = "",
@@ -411,10 +432,12 @@ def build_prompt_fields(
         "remaining_stone": max(0, int(task.goal_stone) - int(collected["stone"])),
         "remaining_iron": max(0, int(task.goal_iron) - int(collected["iron"])),
         "view": int(view),
+        "extraction_limit": max(0, int(extraction_limit)),
         "extraction_range": int(extraction_range),
         "max_path_len": int(max_path_len),
         "current_pos": obs["current_pos"],
         "visible_resources": json.dumps(obs["visible_resources"], ensure_ascii=False, separators=(",", ":")),
+        "reachable_visible_resources": json.dumps(obs["reachable_visible_resources"], ensure_ascii=False, separators=(",", ":")),
         "visible_teammate_pos": json.dumps(obs["visible_teammate_pos"], ensure_ascii=False),
         "received_messages": json.dumps(obs["received_messages"], ensure_ascii=False, separators=(",", ":")),
         "harvest_zone": json.dumps(obs["harvest_zone"], ensure_ascii=False, separators=(",", ":")),
@@ -428,6 +451,7 @@ def render_agent_user_prompt(
     state: ResourceGatheringState,
     agent_idx: int,
     view: int,
+    extraction_limit: int,
     extraction_range: int,
     max_path_len: int,
     user_template: str,
@@ -438,6 +462,7 @@ def render_agent_user_prompt(
         state=state,
         agent_idx=agent_idx,
         view=view,
+        extraction_limit=extraction_limit,
         extraction_range=extraction_range,
         max_path_len=max_path_len,
         feedback=feedback,
@@ -456,6 +481,7 @@ def render_prompts_from_payload(
     task = payload_to_task(payload)
     n = max(1, int(num_agents))
     view = int(payload.get("view") or 2)
+    extraction_limit = int(payload.get("extraction_limit") or 1)
     extraction_range = int(payload.get("extraction_range") or 2)
     max_path_len = int(payload.get("max_path_len") or 4)
 
@@ -476,6 +502,7 @@ def render_prompts_from_payload(
             state=state,
             agent_idx=idx,
             view=view,
+            extraction_limit=extraction_limit,
             extraction_range=extraction_range,
             max_path_len=max_path_len,
             user_template=tmpl,
@@ -486,6 +513,30 @@ def render_prompts_from_payload(
         else:
             prompts.append(user_prompt)
     return prompts
+
+
+def _decode_extraction_targets(
+    *,
+    task: ResourceTaskSpec,
+    raw_cmds: Any,
+    extraction_limit: int,
+) -> List[Coord | None]:
+    if int(extraction_limit) <= 0:
+        return []
+    if not isinstance(raw_cmds, list):
+        return []
+    targets: List[Coord | None] = []
+    for item in raw_cmds[: max(0, int(extraction_limit))]:
+        coord = _parse_coord(item)
+        if coord is None:
+            targets.append(None)
+            continue
+        x, z = int(coord[0]), int(coord[1])
+        if not (0 <= x < int(task.width) and 0 <= z < int(task.height)):
+            targets.append(None)
+            continue
+        targets.append((x, z))
+    return targets
 
 
 def _sanitize_comm_obj(
@@ -567,6 +618,7 @@ def transition_payload(
     state = payload_to_state(payload)
     n = max(1, int(num_agents))
     view = int(payload.get("view") or 2)
+    extraction_limit = max(0, int(payload.get("extraction_limit") or 1))
     extraction_range = int(payload.get("extraction_range") or 2)
     max_path_len = int(payload.get("max_path_len") or 4)
     reward_cfg = payload.get("reward_config") if isinstance(payload.get("reward_config"), Mapping) else {}
@@ -575,6 +627,7 @@ def transition_payload(
         task=task,
         state=state,
         view=view,
+        extraction_limit=extraction_limit,
         extraction_range=extraction_range,
         reward_config=reward_cfg,
         debug=False,
@@ -582,6 +635,7 @@ def transition_payload(
 
     prev_progress = env._progress_score(task=task, collected=state.collected)
     decoded_actions: List[DecodedAgentAction] = []
+    extraction_targets_by_agent: List[List[Coord | None]] = []
     for agent_idx in range(n):
         obs = get_agent_observation(task, state, agent_idx=agent_idx, view=view, extraction_range=extraction_range)
         raw = _extract_json_object(agent_completions[agent_idx] if agent_idx < len(agent_completions) else "")
@@ -589,12 +643,18 @@ def transition_payload(
             comm_obj=raw.get("comm", {}),
             visible_counts=obs["visible_resource_counts"],
         )
+        extraction_targets = _decode_extraction_targets(
+            task=task,
+            raw_cmds=raw.get("cmds", []),
+            extraction_limit=extraction_limit,
+        )
         path, path_valid = _decode_path(
             task=task,
             current_pos=tuple(int(v) for v in obs["current_pos"]),
             raw_path=raw.get("path", [obs["current_pos"]]),
             max_path_len=max_path_len,
         )
+        extraction_targets_by_agent.append(extraction_targets)
         decoded_actions.append(
             DecodedAgentAction(
                 message_obj=comm_obj,
@@ -635,18 +695,40 @@ def transition_payload(
     delta_wood = 0
     delta_stone = 0
     delta_iron = 0
-    auto_harvest_cells = 0
+    valid_extractions = 0
+    wasted_extractions = 0
     productive_harvesters = 0
-    for agent_idx, decoded in enumerate(decoded_actions):
-        yielded, harvested_coords = env._auto_harvest(
-            agent_idx=agent_idx,
-            current_pos=next_state.agent_positions[agent_idx],
-            resources=next_state.resources,
-        )
+    for agent_idx, (decoded, extraction_targets) in enumerate(zip(decoded_actions, extraction_targets_by_agent)):
+        yielded = {"wood": 0, "stone": 0, "iron": 0}
+        harvested_coords: List[Coord] = []
+        current_pos = next_state.agent_positions[agent_idx]
+        for target in extraction_targets:
+            if target is None:
+                wasted_extractions += 1
+                continue
+            if env._manhattan(current_pos, target) > int(extraction_range):
+                wasted_extractions += 1
+                continue
+            counts = next_state.resources.get(target)
+            if counts is None:
+                wasted_extractions += 1
+                continue
+            cell_yielded, remaining = env._apply_extraction(agent_idx=agent_idx, counts=counts)
+            if cell_yielded["wood"] <= 0 and cell_yielded["stone"] <= 0 and cell_yielded["iron"] <= 0:
+                wasted_extractions += 1
+                continue
+            valid_extractions += 1
+            yielded["wood"] += int(cell_yielded["wood"])
+            yielded["stone"] += int(cell_yielded["stone"])
+            yielded["iron"] += int(cell_yielded["iron"])
+            harvested_coords.append((int(target[0]), int(target[1])))
+            if sum(remaining) > 0:
+                next_state.resources[target] = remaining
+            else:
+                next_state.resources.pop(target, None)
         decoded.auto_harvest = harvested_coords
         if harvested_coords:
             productive_harvesters += 1
-        auto_harvest_cells += len(harvested_coords)
         delta_wood += int(yielded["wood"])
         delta_stone += int(yielded["stone"])
         delta_iron += int(yielded["iron"])
@@ -671,7 +753,17 @@ def transition_payload(
     comm_items = sum(int(decoded.comm_items) for decoded in decoded_actions)
     move_penalty = env.move_cost_scale * float(move_steps)
     comm_penalty = env.comm_cost_scale * float(comm_items)
-    reward = progress_bonus + terminal_bonus + move_to_zone_bonus + useful_comm_bonus + first_enter_zone_bonus - move_penalty - comm_penalty
+    wasted_penalty = env.wasted_extraction_penalty * float(wasted_extractions)
+    reward = (
+        progress_bonus
+        + terminal_bonus
+        + move_to_zone_bonus
+        + useful_comm_bonus
+        + first_enter_zone_bonus
+        - move_penalty
+        - comm_penalty
+        - wasted_penalty
+    )
 
     next_state.turn_index = int(state.turn_index) + 1
     next_state.completed = completed
@@ -688,7 +780,7 @@ def transition_payload(
         "bonus_first_enter_zone": float(first_enter_zone_bonus),
         "penalty_move": float(move_penalty),
         "penalty_comm": float(comm_penalty),
-        "penalty_wasted_extraction": 0.0,
+        "penalty_wasted_extraction": float(wasted_penalty),
         "progress_score": float(next_progress),
         "goal_wood": float(task.goal_wood),
         "goal_stone": float(task.goal_stone),
@@ -701,9 +793,9 @@ def transition_payload(
         "delta_iron": float(delta_iron),
         "num_comm_items": float(comm_items),
         "useful_comm_items": float(useful_comm_items),
-        "num_valid_extractions": 0.0,
-        "wasted_extractions": 0.0,
-        "auto_harvest_cells": float(auto_harvest_cells),
+        "num_valid_extractions": float(valid_extractions),
+        "wasted_extractions": float(wasted_extractions),
+        "auto_harvest_cells": 0.0,
         "productive_harvesters": float(productive_harvesters),
         "move_steps": float(move_steps),
         "move_toward_zone_steps": float(move_toward_zone_steps),

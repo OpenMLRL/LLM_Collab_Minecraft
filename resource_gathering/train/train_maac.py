@@ -356,6 +356,7 @@ def main() -> int:
             state_before_turn=state,
             num_agents=num_agents,
             view=int(prompt_ctx["view"]),
+            extraction_limit=int(prompt_ctx["extraction_limit"]),
             extraction_range=int(prompt_ctx["extraction_range"]),
             max_path_len=int(prompt_ctx["max_path_len"]),
             system_prompt=str(prompt_ctx["system_prompt"]),
