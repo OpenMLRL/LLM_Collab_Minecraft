@@ -291,7 +291,7 @@ class ResourceGatheringAdapter:
         print(
             f"[resource_gathering debug] task={task.task_id} family={task.family or 'unknown'} "
             f"turn={turn_idx}/{state.max_turns} reward={float(reward):.3f} "
-            f"progress={float(metrics.get('progress_score', 0.0)):.3f} completed={bool(metrics.get('completed', False))}",
+            f"progress={float(metrics.get('progress_score', 0.0)):.3f} success={bool(metrics.get('success', metrics.get('completed', False)))}",
             flush=True,
         )
         for agent_idx, output in enumerate(agent_outputs):

@@ -113,7 +113,7 @@ def get_reward_function(*, cfg: Dict[str, Any], num_agents: int) -> Callable[...
                 "delta_wood": float(metrics.get("delta_wood", 0.0)),
                 "delta_stone": float(metrics.get("delta_stone", 0.0)),
                 "delta_iron": float(metrics.get("delta_iron", 0.0)),
-                "completed": 1.0 if bool(metrics.get("completed", False)) else 0.0,
+                "success": 1.0 if bool(metrics.get("success", metrics.get("completed", False))) else 0.0,
                 "reward_total": reward,
             },
             turn_idx=turn_idx,
@@ -129,7 +129,7 @@ def get_reward_function(*, cfg: Dict[str, Any], num_agents: int) -> Callable[...
                 f"delta=({float(metrics.get('delta_wood', 0.0)):.0f},"
                 f"{float(metrics.get('delta_stone', 0.0)):.0f},"
                 f"{float(metrics.get('delta_iron', 0.0)):.0f}) "
-                f"completed={bool(metrics.get('completed', False))} "
+                f"success={bool(metrics.get('success', metrics.get('completed', False)))} "
                 f"next_turn={int((next_state or {}).get('turn_index', turn_idx + 1))}",
                 flush=True,
             )

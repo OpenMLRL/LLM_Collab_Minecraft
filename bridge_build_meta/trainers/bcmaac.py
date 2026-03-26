@@ -46,6 +46,7 @@ _ENV_METRIC_KEYS: Tuple[str, ...] = (
     "newly_placed_block_count",
     "num_valid_probes",
     "comm_tokens",
+    "success",
     "connected",
     "gap_st",
     "cc_component_count",

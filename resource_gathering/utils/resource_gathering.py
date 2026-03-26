@@ -709,7 +709,7 @@ def transition_payload(
         "move_toward_zone_steps": float(move_toward_zone_steps),
         "first_enter_zone_count": float(first_enter_zone_count),
         "completed": bool(completed),
-        "connected": bool(completed),
+        "success": bool(completed),
         "terminated": bool(next_state.terminated),
         "turn_index": int(state.turn_index),
     }
