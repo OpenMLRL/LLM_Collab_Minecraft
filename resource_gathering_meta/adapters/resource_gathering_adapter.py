@@ -163,6 +163,7 @@ class ResourceGatheringAdapter:
                 state=state,
                 agent_idx=idx,
                 view=int(payload.get("view") or self.prompt_ctx["view"]),
+                extraction_limit=int(payload.get("extraction_limit") or self.prompt_ctx["extraction_limit"]),
                 extraction_range=int(payload.get("extraction_range") or self.prompt_ctx["extraction_range"]),
                 max_path_len=int(payload.get("max_path_len") or self.prompt_ctx["max_path_len"]),
                 user_template=str(template),
