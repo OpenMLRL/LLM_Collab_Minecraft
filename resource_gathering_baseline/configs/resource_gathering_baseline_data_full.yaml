@@ -90,8 +90,8 @@ baseline:
   actor_gradient_checkpointing: true
 
 reward_shaping:
-  progress_reward_scale: 10.0
-  terminal_bonus: 4.0
+  progress_reward_scale: 8.0
+  terminal_bonus: 7.0
   move_cost_scale: 0.0
   comm_cost_scale: 0.0
   wasted_extraction_penalty: 0.1

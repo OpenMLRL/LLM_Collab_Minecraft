@@ -35,8 +35,8 @@ def _build_reward_config(cfg: Dict[str, Any]) -> Dict[str, float]:
     return {
         "path_slots": int(task_cfg.get("max_path_len", 4)),
         "comm_limit": int(task_cfg.get("comm_limit", 1)),
-        "progress_reward_scale": float(reward_cfg.get("progress_reward_scale", 10.0)),
-        "terminal_bonus": float(reward_cfg.get("terminal_bonus", 4.0)),
+        "progress_reward_scale": float(reward_cfg.get("progress_reward_scale", 8.0)),
+        "terminal_bonus": float(reward_cfg.get("terminal_bonus", 7.0)),
         "move_cost_scale": float(reward_cfg.get("move_cost_scale", 0.0)),
         "comm_cost_scale": float(reward_cfg.get("comm_cost_scale", 0.0)),
         "move_to_zone_bonus_scale": float(reward_cfg.get("move_to_zone_bonus_scale", 0.05)),
