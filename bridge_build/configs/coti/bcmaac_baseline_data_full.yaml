@@ -1,0 +1,121 @@
+agent_model:
+  name: Qwen/Qwen3-4B-Instruct-2507
+  type: qwen
+  temperature: 0.5
+  top_p: 0.6
+  top_k: null
+  max_length: 2048
+  dtype: bf16
+
+critic_model:
+  name: Qwen/Qwen3-4B-Instruct-2507
+  type: qwen
+  max_length: 2048
+  dtype: bf16
+
+seed: 42
+debug: true
+
+coti:
+  variant: baseline
+
+dataset:
+  name: bridge_build
+  type: bridge_build
+  train_split: '[:6]'
+  eval_split: '[6:]'
+  json_path: ../../dataset/data.json
+
+prompt:
+  use_chat_template: true
+
+task:
+  view: 3
+  max_probe: 3
+  max_commands: 40
+  block_agent1:
+  - oak_planks
+  block_agent2:
+  - oak_planks
+
+output:
+  base_dir: output_bridge_build_baseline_full
+  verbose: true
+  save_final_model: false
+  save_path: output_bridge_build_baseline_full
+  save_best_model: false
+  best_model_path: output_bridge_build_baseline_full/best_model
+  best_metric: eval/turn_4/expected_return
+  best_metric_mode: max
+
+external:
+  mode: empty_feedback
+  original_prompt: true
+  previous_response: false
+
+bcmaac:
+  agent_devices:
+  - cuda:0
+  critic_devices:
+  - cuda:0
+  num_agents: 2
+  num_turns: 4
+  critic_type: v
+  num_train_epochs: 180
+  agent_learning_rate: 2.5e-6
+  critic_learning_rate: 2.5e-6
+  rollout_buffer_size: 8
+  train_batch_size: 4
+  value_loss_coef: 0.6
+  max_new_tokens: 160
+  discount: 0.9
+  eval_interval: 10
+  eval_num_samples: 3
+  eval_batch_size: 1
+  logging_steps: 20
+
+baseline:
+  context_learning_rate: 3.0e-5
+  context_hidden_dim: 128
+  context_cnn_channels: 32
+  context_scalar_hidden_dim: 64
+  entropy_coef: 0.01
+  critic_backbone: structured
+  max_grad_norm: 1.0
+  value_head_hidden_dim: 256
+  actor_condition_dim: 128
+  critic_condition_dim: 128
+  preference_loss_coef: 0.1
+  comm_preference_loss_scale: 0.35
+  probe_preference_loss_scale: 0.35
+  cmds_preference_loss_scale: 1.0
+  path_preference_loss_scale: 1.0
+  score_chunk_size: 2
+  actor_gradient_checkpointing: true
+
+reward_shaping:
+  n_adjacent_penalty_scale: 1.5
+  cc_merge_bonus_scale: 0.5
+  y_connected_bonus_scale: 1.0
+  terminal_clean_bonus_scale: 0.0
+  move_progress_bonus_total: 2.5
+  late_quality_turn3_weight: 0.5
+  late_quality_turn4_weight: 1.0
+  late_quality_clean_scale: 0.3
+  late_quality_compact_scale: 0.35
+  late_quality_ready_scale: 0.2
+
+reward_processor:
+  enabled: true
+  scale_factor: 1.0
+  shift: 0.0
+
+wandb:
+  project: bridge_build_baseline
+  entity: OpenMLRL
+  run_name: bridge_build_baseline_data
+  dir: output_bridge_build_baseline_full
+  tags:
+  - bcmaac
+  - bridge_build
+  - baseline

@@ -151,6 +151,7 @@ def _prepare_prompt_context(cfg: Dict[str, Any], *, num_agents: int) -> Dict[str
         "user_template_agent1": str(prompt_cfg.get("user_template_agent1") or prompt_cfg.get("user_template") or "").rstrip(),
         "user_template_agent2": str(prompt_cfg.get("user_template_agent2") or prompt_cfg.get("user_template") or "").rstrip(),
         "view": max(0, int(task_cfg.get("view", 2))),
+        "extraction_limit": max(0, int(task_cfg.get("extraction_limit", 2))),
         "extraction_range": max(0, int(task_cfg.get("extraction_range", 2))),
         "max_path_len": max(1, int(task_cfg.get("max_path_len", 4))),
         "comm_limit": max(0, int(task_cfg.get("comm_limit", 1))),
@@ -233,7 +234,7 @@ def main() -> int:
     parser.add_argument(
         "--config",
         type=str,
-        default=os.path.join(REPO_ROOT, "resource_gathering", "configs", "resource_gathering_maac_config.yaml"),
+        default=os.path.join(REPO_ROOT, "resource_gathering", "configs", "comlrl", "resource_gathering_maac_config.yaml"),
         help="Path to YAML config",
     )
     parser.add_argument(

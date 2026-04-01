@@ -263,7 +263,7 @@ def main() -> int:
     parser.add_argument(
         "--config",
         type=str,
-        default=os.path.join(REPO_ROOT, "bridge_build", "configs", "bridge_build_maac_config.yaml"),
+        default=os.path.join(REPO_ROOT, "bridge_build", "configs", "comlrl", "bridge_build_maac_config.yaml"),
         help="Path to YAML config",
     )
     parser.add_argument(
