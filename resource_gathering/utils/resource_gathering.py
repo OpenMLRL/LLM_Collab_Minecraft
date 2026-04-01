@@ -2,19 +2,11 @@ from __future__ import annotations
 
 import copy
 import json
-import os
 import re
-import sys
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
-
-_USER_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-_NNGAMES_ROOT = os.path.join(_USER_ROOT, "NNGames")
-if os.path.isdir(_NNGAMES_ROOT) and _NNGAMES_ROOT not in sys.path:
-    sys.path.insert(0, _NNGAMES_ROOT)
-
-from NNGames.resource_gathering.envs.nn_env import (
+from LLM_Collab_Minecraft.resource_gathering.envs.nn_env import (
     DecodedAgentAction,
     ResourceGatheringEnv as NNResourceGatheringEnv,
     ResourceGatheringState,
