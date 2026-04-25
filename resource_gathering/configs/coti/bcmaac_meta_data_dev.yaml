@@ -22,8 +22,8 @@ coti:
 dataset:
   name: resource_gathering
   type: resource_gathering
-  train_split: '[:4]'
-  eval_split: '[:4]'
+  train_split: '[:8]'
+  eval_split: '[:8]'
   json_path: ../../dataset/data.json
 
 prompt:
