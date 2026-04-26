@@ -70,8 +70,8 @@ maac:
   max_new_tokens: 512
   discount: 0.9
   early_termination_threshold: 1000
-  eval_interval: 10
-  eval_num_samples: 2
+  eval_interval: 1
+  eval_num_samples: 4
   eval_batch_size: 1
   logging_steps: 20
 

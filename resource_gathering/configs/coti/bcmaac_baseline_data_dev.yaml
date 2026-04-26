@@ -64,8 +64,8 @@ bcmaac:
   value_loss_coef: 0.6
   max_new_tokens: 160
   discount: 0.9
-  eval_interval: 10
-  eval_num_samples: 2
+  eval_interval: 1
+  eval_num_samples: 8
   eval_batch_size: 1
   logging_steps: 20
 
