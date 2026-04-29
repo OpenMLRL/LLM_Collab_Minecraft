@@ -24,8 +24,8 @@ debug: true
 dataset:
   name: resource_gathering
   type: resource_gathering
-  train_split: '[:8]'
-  eval_split: '[8:]'
+  train_split: '[:7]'
+  eval_split: '[7:]'
   json_path: ../../dataset/data.json
 
 prompt:
