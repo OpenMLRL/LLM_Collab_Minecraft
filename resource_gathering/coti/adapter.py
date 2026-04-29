@@ -98,6 +98,26 @@ class ResourceGatheringAdapter:
     def belief_dim(self) -> int:
         return int(self.max_width * self.max_height)
 
+    def _belief_index(self, coord: Coord) -> int:
+        x, z = int(coord[0]), int(coord[1])
+        return int(z * self.max_width + x)
+
+    def _build_belief_supervision(self, *, task: Any, agent_idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        target = torch.zeros(self.belief_dim, dtype=torch.float32)
+        mask = torch.zeros(self.belief_dim, dtype=torch.bool)
+        for z, row in enumerate(task.resources):
+            for x, counts in enumerate(row):
+                wood, stone, iron = int(counts[0]), int(counts[1]), int(counts[2])
+                if wood + stone + iron <= 0:
+                    continue
+                idx = self._belief_index((int(x), int(z)))
+                mask[idx] = True
+                if int(agent_idx) == 0:
+                    target[idx] = 1.0 if wood > 0 else 0.0
+                else:
+                    target[idx] = 1.0 if stone + iron > 0 else 0.0
+        return target, mask
+
     def item_to_payload(self, item: Mapping[str, Any]) -> Dict[str, Any]:
         task = task_from_item(item)
         raw_state = item.get("_resource_state_before_turn")
@@ -199,12 +219,16 @@ class ResourceGatheringAdapter:
         outputs: List[AgentMetaObservation] = []
         for obs in obs_bundle["agents"]:
             task_id = str(obs["task_id"])
+            belief_target, belief_mask = self._build_belief_supervision(
+                task=task,
+                agent_idx=int(obs["agent_index"]),
+            )
             outputs.append(
                 AgentMetaObservation(
                     grid=obs["grid"],
                     scalars=obs["scalars"],
-                    belief_target=obs["belief_target"],
-                    belief_mask=obs["belief_mask"],
+                    belief_target=belief_target,
+                    belief_mask=belief_mask,
                     task_index=int(self.task_id_to_index[task_id]),
                     task_id=task_id,
                     turn_index=int(obs["turn_index"]),
