@@ -112,7 +112,9 @@ class ResourceGatheringAdapter:
                     continue
                 idx = self._belief_index((int(x), int(z)))
                 mask[idx] = True
-                if int(agent_idx) == 0:
+                if self.num_agents == 1:
+                    target[idx] = 1.0
+                elif int(agent_idx) == 0:
                     target[idx] = 1.0 if wood > 0 else 0.0
                 else:
                     target[idx] = 1.0 if stone + iron > 0 else 0.0
@@ -446,6 +448,8 @@ class ResourceGatheringAdapter:
         agent_idx: int,
         visible_resource_counts: Mapping[Coord, Any],
     ) -> Tuple[List[Dict[str, Any]], List[float]]:
+        if self.num_agents == 1:
+            return ([{}], [0.0])
         teammate_idx = 1 - int(agent_idx)
         teammate_targets = set(env._agent_target_resources(task=task, collected=state.collected, agent_idx=teammate_idx))
         self_targets = set(env._agent_target_resources(task=task, collected=state.collected, agent_idx=agent_idx))

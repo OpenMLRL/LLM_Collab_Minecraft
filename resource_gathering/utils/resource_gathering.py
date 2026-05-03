@@ -372,8 +372,15 @@ def get_agent_observation(
         for item in visible_resources
         if tuple(int(v) for v in item["coord"]) in harvest_zone_set
     ]
-    teammate_idx = 1 - int(agent_idx)
-    teammate_pos = state.agent_positions[teammate_idx]
+    num_agents = len(state.agent_positions)
+    if num_agents > 1:
+        teammate_idx = 1 - int(agent_idx)
+        teammate_pos = state.agent_positions[teammate_idx]
+        visible_teammate_pos = (
+            [int(teammate_pos[0]), int(teammate_pos[1])] if teammate_pos in visible else None
+        )
+    else:
+        visible_teammate_pos = None
     return {
         "turn_index": int(state.turn_index),
         "max_turns": int(state.max_turns),
@@ -381,7 +388,7 @@ def get_agent_observation(
         "visible_resources": visible_resources,
         "visible_resource_counts": visible_counts,
         "visible": visible,
-        "visible_teammate_pos": [int(teammate_pos[0]), int(teammate_pos[1])] if teammate_pos in visible else None,
+        "visible_teammate_pos": visible_teammate_pos,
         "received_messages": copy.deepcopy(state.inbox[agent_idx]),
         "harvest_zone": harvest_zone,
         "reachable_visible_resources": reachable_visible_resources,

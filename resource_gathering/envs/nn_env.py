@@ -324,8 +324,8 @@ class ResourceGatheringEnv:
         if not self.tasks:
             raise ValueError("tasks must be non-empty")
         self.num_agents = int(num_agents)
-        if self.num_agents != 2:
-            raise ValueError("resource_gathering currently expects exactly 2 agents")
+        if self.num_agents not in (1, 2):
+            raise ValueError("resource_gathering currently expects 1 or 2 agents")
         self.view = int(view)
         self.max_turns = int(max_turns) if max_turns is not None else None
         self.extraction_limit = max(0, int(extraction_limit))
@@ -618,17 +618,18 @@ class ResourceGatheringEnv:
             )
             visible_counts = self._visible_resource_counts(state=state, visible=visible)
 
-            teammate_targets = self._agent_target_resources(task=task, collected=state.collected, agent_idx=1 - agent_idx)
-            comm_facts: List[Tuple[Coord, str, int]] = []
-            for coord, counts in visible_counts.items():
-                for resource_name in teammate_targets:
-                    count = self._resource_count(counts, resource_name)
-                    if count > 0:
-                        comm_facts.append((coord, resource_name, count))
-            comm_facts.sort(key=lambda item: (-int(item[2]), self._chebyshev(current_pos, item[0]), item[0][1], item[0][0]))
-            for slot, (coord, resource_name, _count) in enumerate(comm_facts[: self.comm_slots]):
-                action[f"comm_coord_{slot}"] = self._coord_to_index(coord)
-                action[f"comm_type_{slot}"] = self._resource_name_to_comm_type(resource_name)
+            if self.num_agents > 1:
+                teammate_targets = self._agent_target_resources(task=task, collected=state.collected, agent_idx=1 - agent_idx)
+                comm_facts: List[Tuple[Coord, str, int]] = []
+                for coord, counts in visible_counts.items():
+                    for resource_name in teammate_targets:
+                        count = self._resource_count(counts, resource_name)
+                        if count > 0:
+                            comm_facts.append((coord, resource_name, count))
+                comm_facts.sort(key=lambda item: (-int(item[2]), self._chebyshev(current_pos, item[0]), item[0][1], item[0][0]))
+                for slot, (coord, resource_name, _count) in enumerate(comm_facts[: self.comm_slots]):
+                    action[f"comm_coord_{slot}"] = self._coord_to_index(coord)
+                    action[f"comm_type_{slot}"] = self._resource_name_to_comm_type(resource_name)
 
             zone = self._work_zone(task=task, state=state, agent_idx=agent_idx)
             target_pos = self._nearest_zone_pos(origin=current_pos, zone=zone)
@@ -956,10 +957,11 @@ class ResourceGatheringEnv:
                 grid[channel_idx, z, x] = max(grid[channel_idx, z, x], float(count) / norm)
         cur = state.agent_positions[agent_idx]
         grid[7, int(cur[1]), int(cur[0])] = 1.0
-        teammate_idx = 1 - agent_idx
-        teammate_pos = state.agent_positions[teammate_idx]
-        if teammate_pos in visible:
-            grid[8, int(teammate_pos[1]), int(teammate_pos[0])] = 1.0
+        if self.num_agents > 1:
+            teammate_idx = 1 - agent_idx
+            teammate_pos = state.agent_positions[teammate_idx]
+            if teammate_pos in visible:
+                grid[8, int(teammate_pos[1]), int(teammate_pos[0])] = 1.0
         for coord in self._extract_reach(cur):
             grid[9, int(coord[1]), int(coord[0])] = 1.0
         return grid
@@ -1010,7 +1012,9 @@ class ResourceGatheringEnv:
                 if wood + stone + iron <= 0:
                     continue
                 mask[idx] = True
-                if agent_idx == 0:
+                if self.num_agents == 1:
+                    target[idx] = 1.0
+                elif agent_idx == 0:
                     target[idx] = 1.0 if wood > 0 else 0.0
                 else:
                     target[idx] = 1.0 if (stone + iron) > 0 else 0.0
@@ -1061,6 +1065,9 @@ class ResourceGatheringEnv:
 
     def _apply_extraction(self, *, agent_idx: int, counts: ResourceTriple) -> Tuple[Dict[str, int], ResourceTriple]:
         wood, stone, iron = int(counts[0]), int(counts[1]), int(counts[2])
+        if self.num_agents == 1:
+            yielded = {"wood": wood, "stone": stone, "iron": iron}
+            return yielded, (0, 0, 0)
         if agent_idx == 0:
             yielded = {"wood": wood, "stone": 0, "iron": 0}
             return yielded, (0, stone, iron)
@@ -1100,9 +1107,18 @@ class ResourceGatheringEnv:
         collected: Mapping[str, int],
         agent_idx: int,
     ) -> Tuple[str, ...]:
+        if self.num_agents == 1:
+            targets: List[str] = []
+            if int(collected.get("wood", 0)) < int(task.goal_wood):
+                targets.append("wood")
+            if int(collected.get("stone", 0)) < int(task.goal_stone):
+                targets.append("stone")
+            if int(collected.get("iron", 0)) < int(task.goal_iron):
+                targets.append("iron")
+            return tuple(targets)
         if agent_idx == 0:
             return ("wood",) if int(collected.get("wood", 0)) < int(task.goal_wood) else ()
-        targets: List[str] = []
+        targets = []
         if int(collected.get("stone", 0)) < int(task.goal_stone):
             targets.append("stone")
         if int(collected.get("iron", 0)) < int(task.goal_iron):
