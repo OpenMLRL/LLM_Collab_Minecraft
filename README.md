@@ -187,11 +187,9 @@ connects the two anchor regions under four-neighbor connectivity.
   $r^{\mathrm{RG}}_t = 8.0\,\Delta p_t + 7.0\,c_t + 0.1\,u_t + 0.05\,z_t + 0.15\,e_t - 0.1\,w_t$,
   with $p_t$ collection progress, $c_t$ terminal-completion indicator, $u_t$ useful
   resource facts, $z_t$/$e_t$ zone-routing terms, $w_t$ wasted extractions.
-- **Bridge Building**: $r^{\mathrm{BB}}_t$ combines connection-gap reduction
-  $g_{t-1}-g_t$, newly merged components $m_t$, true-support connections $y_t$,
-  terminal connectivity $c_t$, cross-side movement $\Delta d_t$, fake-support unsafe
-  adjacencies $-n_t$, block usage $-b_t$, and a late-turn quality term
-  $q^{\mathrm{late}}_t$.
+- **Bridge Building**: the reward `r^BB_t` combines connection-gap reduction `g_{t-1} − g_t`, newly merged components `m_t`, true-support connections `y_t`, terminal connectivity `c_t`, cross-side movement `Δd_t`, fake-support unsafe adjacencies `−n_t`, block usage `−b_t`, and a late-turn quality term `q^late_t`.
+
+
 
 ### Method overview
 
