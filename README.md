@@ -4,6 +4,8 @@ This repo provides the Minecraft environments for [**CoMLRL**](https://github.co
 
 <img src="./demo_mc.png" alt="Writing demo" width="500px">
 
+<img src="./demo_mc2.png" alt="Writing demo" width="500px">
+
 ## Installation
 
 Install [**CoMLRL**](https://github.com/OpenMLRL/CoMLRL):
