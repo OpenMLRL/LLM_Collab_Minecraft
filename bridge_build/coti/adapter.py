@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import json
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
@@ -66,6 +67,32 @@ class BridgeBuildAdapter:
         "msg_candidate",
         "self_pos",
     )
+
+    # Partner-action taxonomy for the BCMAAC L_p auxiliary head.
+    num_partner_action_types: int = 4
+
+    @staticmethod
+    def parse_action_type(completion: str) -> int:
+        """Classify a partner's bridge_build action JSON.
+
+        0=PLACE (/fill cmds), 1=SCOUT (probe or path/move), 2=COMM, 3=NOOP.
+        Single-label with priority cmds > probe|path > comm > noop. probe and
+        path are merged so every real action field maps to a non-NOOP class
+        within the 4-way budget (the env consumes all of cmds/probe/comm/path).
+        """
+        try:
+            obj = json.loads(completion)
+        except (json.JSONDecodeError, TypeError):
+            return 3
+        if not isinstance(obj, dict):
+            return 3
+        if obj.get("cmds"):
+            return 0
+        if obj.get("probe") or obj.get("path"):
+            return 1
+        if obj.get("comm"):
+            return 2
+        return 3
 
     def __init__(
         self,

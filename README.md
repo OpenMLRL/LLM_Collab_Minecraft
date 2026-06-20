@@ -163,6 +163,28 @@ python -m LLM_Collab_Minecraft.bridge_build.train.train_coti \
   --config LLM_Collab_Minecraft/bridge_build/configs/coti/bcmaac_baseline_data_full.yaml
 ```
 
+The auxiliary objective is `L_aux = lambda_b * L_b + lambda_p * L_p`. The `meta`
+config is the **full BCMAAC** (both terms on): `L_b` (task-belief) is the belief
+BCE (`belief_loss_coef`) plus the answer-readiness BCE (`answer_readiness_loss_coef`),
+and `L_p` (partner-action CE) uses `partner_action_loss_coef`. Ablations are run
+by overriding coefficients to 0 — no extra config files needed:
+
+```bash
+# Full BCMAAC (L_b + L_p): just run meta, no override
+python -m LLM_Collab_Minecraft.resource_gathering.train.train_coti \
+  --config LLM_Collab_Minecraft/resource_gathering/configs/coti/bcmaac_meta_data_full.yaml
+
+# BCMAAC-B (task-belief only): disable L_p
+python -m LLM_Collab_Minecraft.resource_gathering.train.train_coti \
+  --config LLM_Collab_Minecraft/resource_gathering/configs/coti/bcmaac_meta_data_full.yaml \
+  --override meta.partner_action_loss_coef=0.0
+
+# BCMAAC-P (partner-action only): disable the whole L_b group (belief + answer-readiness)
+python -m LLM_Collab_Minecraft.bridge_build.train.train_coti \
+  --config LLM_Collab_Minecraft/bridge_build/configs/coti/bcmaac_meta_data_full.yaml \
+  --override meta.belief_loss_coef=0.0 meta.answer_readiness_loss_coef=0.0
+```
+
 Reference hyperparameters: 180 epochs, rollout/batch 8/4, $\gamma=0.9$,
 actor/critic LR $2.5\times10^{-6}$, context LR $3.0\times10^{-5}$, 160 max new
 tokens, Qwen3-4B-Instruct-2507 in bf16. Override any field with

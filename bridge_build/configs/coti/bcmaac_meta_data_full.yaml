@@ -79,7 +79,11 @@ meta:
   context_hidden_dim: 128
   context_cnn_channels: 32
   context_scalar_hidden_dim: 64
+  # L_b group (task-belief): belief BCE + answer-readiness BCE
   belief_loss_coef: 0.15
+  answer_readiness_loss_coef: 0.1
+  # L_p (partner-action CE); meta = full BCMAAC. Ablate via --override.
+  partner_action_loss_coef: 0.15
   entropy_coef: 0.01
   critic_backbone: structured
   max_grad_norm: 1.0

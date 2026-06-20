@@ -53,6 +53,31 @@ class AgentActionCandidates:
 class ResourceGatheringAdapter:
     channel_names: Sequence[str] = tuple(NNResourceGatheringEnv.channel_names)
 
+    # Partner-action taxonomy for the BCMAAC L_p auxiliary head.
+    num_partner_action_types: int = 4
+
+    @staticmethod
+    def parse_action_type(completion: str) -> int:
+        """Classify a partner's resource_gathering action JSON.
+
+        0=GATHER (resource/extraction cmds), 1=MOVE (path), 2=COMM, 3=NOOP.
+        Single-label with priority cmds > path > comm > noop, mirroring how the
+        env/action fields (cmds, path, comm) drive task progress.
+        """
+        try:
+            obj = json.loads(completion)
+        except (json.JSONDecodeError, TypeError):
+            return 3
+        if not isinstance(obj, dict):
+            return 3
+        if obj.get("cmds"):
+            return 0
+        if obj.get("path"):
+            return 1
+        if obj.get("comm"):
+            return 2
+        return 3
+
     def __init__(
         self,
         *,
