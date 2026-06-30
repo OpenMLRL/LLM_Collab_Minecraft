@@ -194,6 +194,7 @@ def get_trainer_args(cfg: Dict[str, Any], *, sampling_cfg: Dict[str, Any]) -> MA
                 tr.get("reference_kl_enabled", False), False
             ),
             "reference_kl_coef": _as_float(tr.get("reference_kl_coef", 0.1), 0.1),
+            "reference_devices": _as_device_spec(tr.get("reference_devices", None)),
         }
     )
 
@@ -256,6 +257,7 @@ def get_maac_args(cfg: Dict[str, Any], *, sampling_cfg: Dict[str, Any]) -> MAACC
             tr.get("reference_kl_enabled", False), False
         ),
         "reference_kl_coef": _as_float(tr.get("reference_kl_coef", 0.1), 0.1),
+        "reference_devices": _as_device_spec(tr.get("reference_devices", None)),
     }
 
     try:
@@ -321,6 +323,7 @@ def get_iac_args(cfg: Dict[str, Any], *, sampling_cfg: Dict[str, Any]) -> IACCon
             tr.get("reference_kl_enabled", False), False
         ),
         "reference_kl_coef": _as_float(tr.get("reference_kl_coef", 0.1), 0.1),
+        "reference_devices": _as_device_spec(tr.get("reference_devices", None)),
     }
 
     try:
