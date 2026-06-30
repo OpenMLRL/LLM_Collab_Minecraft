@@ -32,7 +32,10 @@ from LLM_Collab_Minecraft.house_build.external import (
     get_external_transition as external_get_transition,
     set_context_resolver as external_set_context_resolver,
 )
-from LLM_Collab_Minecraft.house_build.rewards.house_builder_reward import get_reward_function
+from LLM_Collab_Minecraft.house_build.rewards.house_builder_reward import (
+    evaluate_house_builder_outputs,
+    get_reward_function,
+)
 from LLM_Collab_Minecraft.house_build.utils.house_builder import (
     TaskSpec,
     compute_resource_limits,
@@ -343,6 +346,79 @@ def _build_formatters(cfg: Dict[str, Any], *, num_agents: int, tokenizer: Any | 
     ]
 
 
+def _build_house_eval_logging(
+    *,
+    cfg: Dict[str, Any],
+    num_agents: int,
+    items: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    def _normalize_key(value: str) -> str:
+        return " ".join((value or "").split()).strip()
+
+    item_by_prompt = {
+        _normalize_key(str(item.get("prompt") or "")): dict(item)
+        for item in items
+        if _normalize_key(str(item.get("prompt") or ""))
+    }
+
+    def eval_logger(*, agent_completions_turns, prompts=None, **_kwargs: Any):
+        if not agent_completions_turns:
+            return []
+        prompts = prompts or []
+        sample_count = len(agent_completions_turns[0])
+        records: List[Dict[str, float]] = []
+        for sample_idx in range(sample_count):
+            prompt = str(prompts[sample_idx]) if sample_idx < len(prompts) else ""
+            item = item_by_prompt.get(_normalize_key(prompt))
+            if not item:
+                continue
+            sample_metrics: Dict[str, float] = {}
+            turn_count = 0
+            for agent_turns in agent_completions_turns:
+                if sample_idx < len(agent_turns):
+                    turn_count = max(turn_count, len(agent_turns[sample_idx]))
+            for turn_idx in range(turn_count):
+                completions: List[List[str]] = []
+                for agent_idx in range(num_agents):
+                    completion = ""
+                    if (
+                        agent_idx < len(agent_completions_turns)
+                        and sample_idx < len(agent_completions_turns[agent_idx])
+                        and turn_idx
+                        < len(agent_completions_turns[agent_idx][sample_idx])
+                    ):
+                        completion = agent_completions_turns[agent_idx][sample_idx][
+                            turn_idx
+                        ]
+                    completions.append([completion])
+                result = evaluate_house_builder_outputs(
+                    cfg=cfg,
+                    num_agents=num_agents,
+                    agent_completions=completions,
+                    batch_item=item,
+                )
+                prefix = f"turn_{turn_idx + 1}/"
+                for key, value in result.get("log_metrics", {}).items():
+                    sample_metrics[prefix + key] = float(value)
+            if sample_metrics:
+                records.append(sample_metrics)
+        return records
+
+    def eval_aggregator(metrics_list: List[Dict[str, float]], num_turns: int = 1):
+        del num_turns
+        values_by_key: Dict[str, List[float]] = {}
+        for metrics in metrics_list:
+            for key, value in metrics.items():
+                values_by_key.setdefault(key, []).append(float(value))
+        return {
+            key: float(sum(values) / len(values))
+            for key, values in values_by_key.items()
+            if values
+        }
+
+    return {"eval_logger": eval_logger, "eval_aggregator": eval_aggregator}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Train HouseBuild with GRPO (CoMLRL MAGRPOTrainer)")
     parser.add_argument(
@@ -531,6 +607,13 @@ def main() -> int:
         "wandb_config": wandb_config,
         "dataset_type": str(dataset_cfg.get("type") or "house_build"),
     }
+    trainer_kwargs.update(
+        _build_house_eval_logging(
+            cfg=cfg,
+            num_agents=num_agents,
+            items=[*train_items, *eval_items],
+        )
+    )
     if reward_processor is not None:
         trainer_kwargs["reward_processor"] = reward_processor
 

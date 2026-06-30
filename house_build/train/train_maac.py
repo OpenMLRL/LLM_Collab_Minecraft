@@ -32,7 +32,10 @@ from LLM_Collab_Minecraft.house_build.external import (
     get_external_transition as external_get_transition,
     set_context_resolver as external_set_context_resolver,
 )
-from LLM_Collab_Minecraft.house_build.rewards.house_builder_reward import get_reward_function
+from LLM_Collab_Minecraft.house_build.rewards.house_builder_reward import (
+    build_ac_house_metrics_callback,
+    get_reward_function,
+)
 from LLM_Collab_Minecraft.house_build.utils.house_builder import (
     TaskSpec,
     compute_resource_limits,
@@ -552,6 +555,10 @@ def main() -> int:
         return {}
 
     reward_base = get_reward_function(cfg=cfg, num_agents=num_agents)
+    metrics_callback = build_ac_house_metrics_callback(
+        cfg=cfg,
+        num_agents=num_agents,
+    )
     if num_agents == 1:
 
         def reward_func(prompts: List[str], agent1_completions: List[str]) -> List[float]:
@@ -661,6 +668,7 @@ def main() -> int:
             "critic_value_head_hidden_dim": maac_cfg.get("critic_value_head_hidden_dim"),
         },
         "wandb_config": wandb_config,
+        "metrics_callback": metrics_callback,
     }
     trainer_kwargs["agent_model"] = model_name or None
     if agent_names:
