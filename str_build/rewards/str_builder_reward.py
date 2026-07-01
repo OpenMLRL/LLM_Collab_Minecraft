@@ -14,20 +14,6 @@ from LLM_Collab_Minecraft.str_build.utils.str_builder import (
 )
 
 
-def _log_train_metrics(metrics: Mapping[str, float], *, turn_idx: int | None) -> None:
-    try:
-        import wandb  # type: ignore
-
-        run = getattr(wandb, "run", None)
-        if run is None:
-            return
-        prefix = f"turn_{int(turn_idx)}" if turn_idx else "turn_1"
-        payload = {f"{prefix}/{k}": float(v) for k, v in metrics.items()}
-        wandb.log(payload, commit=False)
-    except Exception:
-        return
-
-
 def _compute_iou(metrics: Mapping[str, Any]) -> float:
     covered = float(metrics.get("covered", 0.0))
     extra = float(metrics.get("extra_blocks", 0.0))
@@ -57,27 +43,33 @@ def _task_from_batch_item(item: Mapping[str, Any]) -> TaskSpec:
     )
 
 
-def get_reward_function(*, cfg: Dict[str, Any], num_agents: int) -> Callable[..., List[float]]:
-    """Return a reward function for str_build using coverage and penalty ratios."""
+def _as_block_list(value: Any) -> List[str]:
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple)):
+        out = []
+        for item in value:
+            text = str(item).strip()
+            if text:
+                out.append(text)
+        return out
+    text = str(value).strip()
+    return [text] if text else []
+
+
+def evaluate_str_builder_outputs(
+    *,
+    cfg: Dict[str, Any],
+    num_agents: int,
+    agent_completions: List[List[str]],
+    batch_item: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Evaluate STR Build outputs and return reward plus canonical log metrics."""
     task_cfg = cfg.get("task") or {}
     if not isinstance(task_cfg, dict):
         task_cfg = {}
 
     max_commands_total = _as_int(task_cfg.get("max_commands"), 600)
-
-    def _as_block_list(v: Any) -> List[str]:
-        if v is None:
-            return []
-        if isinstance(v, (list, tuple)):
-            out = []
-            for x in v:
-                s = str(x).strip()
-                if s:
-                    out.append(s)
-            return out
-        s = str(v).strip()
-        return [s] if s else []
-
     allowed_blocks_agent1 = _as_block_list(task_cfg.get("block_agent1"))
     if not allowed_blocks_agent1:
         raise ValueError("task.block_agent1 must be provided and non-empty")
@@ -90,6 +82,221 @@ def get_reward_function(*, cfg: Dict[str, Any], num_agents: int) -> Callable[...
     if num_agents >= 2:
         allowed_blocks_per_agent.append(allowed_blocks_agent2)
 
+    task = _task_from_batch_item(batch_item)
+    world_bbox_from = task.local_bbox_from
+    world_bbox_to = task.local_bbox_to
+
+    if int(num_agents) == 1:
+        completion = (
+            agent_completions[0][0] if agent_completions and agent_completions[0] else ""
+        )
+        accepted, _rejected = validate_and_normalize_mc_commands(
+            lines=extract_command_lines(completion),
+            allowed_blocks=allowed_blocks_agent1,
+            world_bbox_from=world_bbox_from,
+            world_bbox_to=world_bbox_to,
+            max_commands=max_commands_total,
+        )
+        merged = accepted
+    elif int(num_agents) == 2:
+        max_commands_per_agent = max(1, max_commands_total // int(num_agents))
+        max_commands_agent1 = max_commands_per_agent + (
+            max_commands_total % int(num_agents)
+        )
+        max_commands_agent2 = max_commands_per_agent
+
+        c1 = agent_completions[0][0] if agent_completions and agent_completions[0] else ""
+        c2 = (
+            agent_completions[1][0]
+            if len(agent_completions) > 1 and agent_completions[1]
+            else ""
+        )
+
+        accepted_1, _rejected_1 = validate_and_normalize_mc_commands(
+            lines=extract_command_lines(c1),
+            allowed_blocks=allowed_blocks_agent1,
+            world_bbox_from=world_bbox_from,
+            world_bbox_to=world_bbox_to,
+            max_commands=max_commands_agent1,
+        )
+        accepted_2, _rejected_2 = validate_and_normalize_mc_commands(
+            lines=extract_command_lines(c2),
+            allowed_blocks=allowed_blocks_agent2,
+            world_bbox_from=world_bbox_from,
+            world_bbox_to=world_bbox_to,
+            max_commands=max_commands_agent2,
+        )
+        merged = [*accepted_1, *accepted_2]
+    else:
+        raise ValueError("num_agents must be 1 or 2")
+
+    blocks = simulate_commands_to_scan_blocks(
+        commands=merged,
+        world_bbox_from=world_bbox_from,
+        world_bbox_to=world_bbox_to,
+    )
+    expected_map, _owners = build_target_color_map(
+        task=task,
+        allowed_blocks_per_agent=allowed_blocks_per_agent,
+        num_agents=num_agents,
+    )
+    metrics = score_str_builder(
+        task=task,
+        world_scan_blocks=blocks,
+        expected_map=expected_map,
+        allowed_blocks_per_agent=allowed_blocks_per_agent,
+    )
+    reward = float(metrics.get("score_mean", 0.0))
+    return {
+        "reward": reward,
+        "metrics": metrics,
+        "blocks": blocks,
+        "log_metrics": {
+            "iou": _compute_iou(metrics),
+            "level_1": float(metrics.get("score_acc", 0.0)),
+            "level_2": -float(metrics.get("penalty_extra", 0.0)),
+            "level_3": -float(metrics.get("penalty_adj", 0.0)),
+            "level_4": -float(metrics.get("penalty_missing_palette", 0.0)),
+            "score": reward,
+        },
+    }
+
+
+def build_ac_str_metrics_callback(*, cfg: Dict[str, Any], num_agents: int):
+    def callback(rollouts: List[Any]) -> Dict[str, float]:
+        return aggregate_ac_str_metrics(
+            rollouts,
+            cfg=cfg,
+            num_agents=int(num_agents),
+        )
+
+    return callback
+
+
+def aggregate_ac_str_metrics(
+    rollouts: List[Any], *, cfg: Dict[str, Any], num_agents: int
+) -> Dict[str, float]:
+    if not rollouts:
+        return {}
+
+    grouped: Dict[tuple[int, int], List[Any]] = {}
+    for sample in rollouts:
+        metadata = getattr(sample, "metadata", {}) or {}
+        generation_idx = int(metadata.get("generation_idx", 0))
+        turn_idx = int(metadata.get("turn_idx", 0))
+        grouped.setdefault((generation_idx, turn_idx), []).append(sample)
+
+    metric_values: Dict[str, List[float]] = {}
+    for (_generation_idx, turn_idx), samples in sorted(grouped.items()):
+        batch_item = _first_batch_item(samples)
+        if not batch_item:
+            continue
+        completions: List[List[str]] = [[] for _ in range(max(1, int(num_agents)))]
+        for sample in samples:
+            agent_idx = int(getattr(sample, "agent_idx", 0))
+            if 0 <= agent_idx < len(completions):
+                completions[agent_idx].append(str(getattr(sample, "completion", "") or ""))
+        result = evaluate_str_builder_outputs(
+            cfg=cfg,
+            num_agents=num_agents,
+            agent_completions=completions,
+            batch_item=batch_item,
+        )
+        prefix = f"turn_{turn_idx + 1}/"
+        for key, value in result.get("log_metrics", {}).items():
+            metric_values.setdefault(prefix + key, []).append(float(value))
+
+    return {
+        key: float(sum(values) / len(values))
+        for key, values in metric_values.items()
+        if values
+    }
+
+
+def build_str_eval_logging(
+    *,
+    cfg: Dict[str, Any],
+    num_agents: int,
+    items: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    def _normalize_key(value: str) -> str:
+        return " ".join((value or "").split()).strip()
+
+    item_by_prompt = {
+        _normalize_key(str(item.get("prompt") or "")): dict(item)
+        for item in items
+        if _normalize_key(str(item.get("prompt") or ""))
+    }
+
+    def eval_logger(*, agent_completions_turns, prompts=None, **_kwargs: Any):
+        if not agent_completions_turns:
+            return []
+        prompts = prompts or []
+        sample_count = len(agent_completions_turns[0])
+        records: List[Dict[str, float]] = []
+        for sample_idx in range(sample_count):
+            prompt = str(prompts[sample_idx]) if sample_idx < len(prompts) else ""
+            item = item_by_prompt.get(_normalize_key(prompt))
+            if not item:
+                continue
+            sample_metrics: Dict[str, float] = {}
+            turn_count = 0
+            for agent_turns in agent_completions_turns:
+                if sample_idx < len(agent_turns):
+                    turn_count = max(turn_count, len(agent_turns[sample_idx]))
+            for turn_idx in range(turn_count):
+                completions: List[List[str]] = []
+                for agent_idx in range(num_agents):
+                    completion = ""
+                    if (
+                        agent_idx < len(agent_completions_turns)
+                        and sample_idx < len(agent_completions_turns[agent_idx])
+                        and turn_idx
+                        < len(agent_completions_turns[agent_idx][sample_idx])
+                    ):
+                        completion = agent_completions_turns[agent_idx][sample_idx][
+                            turn_idx
+                        ]
+                    completions.append([completion])
+                result = evaluate_str_builder_outputs(
+                    cfg=cfg,
+                    num_agents=num_agents,
+                    agent_completions=completions,
+                    batch_item=item,
+                )
+                prefix = f"turn_{turn_idx + 1}/"
+                for key, value in result.get("log_metrics", {}).items():
+                    sample_metrics[prefix + key] = float(value)
+            if sample_metrics:
+                records.append(sample_metrics)
+        return records
+
+    def eval_aggregator(metrics_list: List[Dict[str, float]], num_turns: int = 1):
+        del num_turns
+        values_by_key: Dict[str, List[float]] = {}
+        for metrics in metrics_list:
+            for key, value in metrics.items():
+                values_by_key.setdefault(key, []).append(float(value))
+        return {
+            key: float(sum(values) / len(values))
+            for key, values in values_by_key.items()
+            if values
+        }
+
+    return {"eval_logger": eval_logger, "eval_aggregator": eval_aggregator}
+
+
+def _first_batch_item(samples: List[Any]) -> Mapping[str, Any]:
+    for sample in samples:
+        metadata = getattr(sample, "metadata", {}) or {}
+        item = metadata.get("batch_item")
+        if isinstance(item, Mapping):
+            return item
+    return {}
+
+
+def get_reward_function(*, cfg: Dict[str, Any], num_agents: int) -> Callable[..., List[float]]:
+    """Return a reward function for str_build using coverage and penalty ratios."""
     output_cfg = cfg.get("output") or {}
     if not isinstance(output_cfg, dict):
         output_cfg = {}
@@ -162,57 +369,26 @@ def get_reward_function(*, cfg: Dict[str, Any], num_agents: int) -> Callable[...
                 print((raw or "").rstrip(), flush=True)
 
     if num_agents == 1:
-        max_commands_agent1 = max_commands_total
-
         def reward_fn(agent1_completions: List[str], *, batch_items: List[Mapping[str, Any]] | None = None) -> List[float]:
             batch_item = (batch_items or [{}])[0]
             task = _task_from_batch_item(batch_item)
             turn_idx = None
             if isinstance(batch_item, Mapping):
                 turn_idx = batch_item.get("_str_build_turn")
-            world_bbox_from = task.local_bbox_from
-            world_bbox_to = task.local_bbox_to
-
             completion = agent1_completions[0] if agent1_completions else ""
-            lines = extract_command_lines(completion)
-            accepted, _rejected = validate_and_normalize_mc_commands(
-                lines=lines,
-                allowed_blocks=allowed_blocks_agent1,
-                world_bbox_from=world_bbox_from,
-                world_bbox_to=world_bbox_to,
-                max_commands=max_commands_agent1,
-            )
-
-            blocks = simulate_commands_to_scan_blocks(commands=accepted, world_bbox_from=world_bbox_from, world_bbox_to=world_bbox_to)
-            expected_map, _owners = build_target_color_map(
-                task=task,
-                allowed_blocks_per_agent=allowed_blocks_per_agent,
+            result = evaluate_str_builder_outputs(
+                cfg=cfg,
                 num_agents=num_agents,
+                agent_completions=[[completion]],
+                batch_item=batch_item,
             )
-            metrics = score_str_builder(
-                task=task,
-                world_scan_blocks=blocks,
-                expected_map=expected_map,
-                allowed_blocks_per_agent=allowed_blocks_per_agent,
-            )
-            reward = float(metrics.get("score_mean", 0.0))
-            _log_train_metrics(
-                {
-                    "iou": _compute_iou(metrics),
-                    "level_1": float(metrics.get("score_acc", 0.0)),
-                    "level_2": -float(metrics.get("penalty_extra", 0.0)),
-                    "level_3": -float(metrics.get("penalty_adj", 0.0)),
-                    "level_4": -float(metrics.get("penalty_missing_palette", 0.0)),
-                    "level_total": float(metrics.get("score_total", reward)),
-                },
-                turn_idx=turn_idx,
-            )
+            reward = float(result["reward"])
             if debug_enabled:
-                obs_map = {tuple(b["pos"]): normalize_block_id(b.get("name") or "air") for b in blocks}
+                obs_map = {tuple(b["pos"]): normalize_block_id(b.get("name") or "air") for b in result["blocks"]}
                 _maybe_debug_print(
                     task=task,
                     reward=reward,
-                    metrics=metrics,
+                    metrics=result["metrics"],
                     obs_map=obs_map,
                     turn_idx=turn_idx,
                     raw_outputs=[completion],
@@ -223,10 +399,6 @@ def get_reward_function(*, cfg: Dict[str, Any], num_agents: int) -> Callable[...
 
     if num_agents != 2:
         raise ValueError("num_agents must be 1 or 2")
-
-    max_commands_per_agent = max(1, max_commands_total // num_agents)
-    max_commands_agent1 = max_commands_per_agent + (max_commands_total % num_agents)
-    max_commands_agent2 = max_commands_per_agent
 
     def reward_fn(
         agent1_completions: List[str],
@@ -239,60 +411,22 @@ def get_reward_function(*, cfg: Dict[str, Any], num_agents: int) -> Callable[...
         turn_idx = None
         if isinstance(batch_item, Mapping):
             turn_idx = batch_item.get("_str_build_turn")
-        world_bbox_from = task.local_bbox_from
-        world_bbox_to = task.local_bbox_to
 
         c1 = agent1_completions[0] if agent1_completions else ""
         c2 = agent2_completions[0] if agent2_completions else ""
-
-        lines_1 = extract_command_lines(c1)
-        lines_2 = extract_command_lines(c2)
-        accepted_1, _rejected_1 = validate_and_normalize_mc_commands(
-            lines=lines_1,
-            allowed_blocks=allowed_blocks_agent1,
-            world_bbox_from=world_bbox_from,
-            world_bbox_to=world_bbox_to,
-            max_commands=max_commands_agent1,
-        )
-        accepted_2, _rejected_2 = validate_and_normalize_mc_commands(
-            lines=lines_2,
-            allowed_blocks=allowed_blocks_agent2,
-            world_bbox_from=world_bbox_from,
-            world_bbox_to=world_bbox_to,
-            max_commands=max_commands_agent2,
-        )
-
-        merged = [*accepted_1, *accepted_2]
-        blocks = simulate_commands_to_scan_blocks(commands=merged, world_bbox_from=world_bbox_from, world_bbox_to=world_bbox_to)
-        expected_map, _owners = build_target_color_map(
-            task=task,
-            allowed_blocks_per_agent=allowed_blocks_per_agent,
+        result = evaluate_str_builder_outputs(
+            cfg=cfg,
             num_agents=num_agents,
+            agent_completions=[[c1], [c2]],
+            batch_item=batch_item,
         )
-        metrics = score_str_builder(
-            task=task,
-            world_scan_blocks=blocks,
-            expected_map=expected_map,
-            allowed_blocks_per_agent=allowed_blocks_per_agent,
-        )
-        reward = float(metrics.get("score_mean", 0.0))
-        _log_train_metrics(
-            {
-                "iou": _compute_iou(metrics),
-                "level_1": float(metrics.get("score_acc", 0.0)),
-                "level_2": -float(metrics.get("penalty_extra", 0.0)),
-                "level_3": -float(metrics.get("penalty_adj", 0.0)),
-                "level_4": -float(metrics.get("penalty_missing_palette", 0.0)),
-                "level_total": float(metrics.get("score_total", reward)),
-            },
-            turn_idx=turn_idx,
-        )
+        reward = float(result["reward"])
         if debug_enabled:
-            obs_map = {tuple(b["pos"]): normalize_block_id(b.get("name") or "air") for b in blocks}
+            obs_map = {tuple(b["pos"]): normalize_block_id(b.get("name") or "air") for b in result["blocks"]}
             _maybe_debug_print(
                 task=task,
                 reward=reward,
-                metrics=metrics,
+                metrics=result["metrics"],
                 obs_map=obs_map,
                 turn_idx=turn_idx,
                 raw_outputs=[c1, c2],
