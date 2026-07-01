@@ -146,10 +146,12 @@ def evaluate_house_builder_outputs(
             "metrics": metrics,
             "blocks": blocks,
             "log_metrics": {
-                "house/iou": float(metrics.get("iou", 0.0)),
-                "house/structure_match": float(metrics.get("score_match", 0.0)),
-                "house/spider_penalty": 0.0,
-                "house/score": reward,
+                "minecraft/iou": float(metrics.get("iou", 0.0)),
+                "minecraft/level_1": float(metrics.get("score_match", 0.0)),
+                "minecraft/level_2": 0.0,
+                "minecraft/level_3": 0.0,
+                "minecraft/level_4": 0.0,
+                "minecraft/score": reward,
             },
         }
 
@@ -223,10 +225,12 @@ def evaluate_house_builder_outputs(
         "metrics": metrics,
         "blocks": blocks,
         "log_metrics": {
-            "house/iou": float(metrics.get("iou", 0.0)),
-            "house/structure_match": float(metrics.get("score_match", 0.0)),
-            "house/spider_penalty": float(spider_penalty),
-            "house/score": reward,
+            "minecraft/iou": float(metrics.get("iou", 0.0)),
+            "minecraft/level_1": float(metrics.get("score_match", 0.0)),
+            "minecraft/level_2": -float(spider_penalty),
+            "minecraft/level_3": 0.0,
+            "minecraft/level_4": 0.0,
+            "minecraft/score": reward,
         },
     }
 

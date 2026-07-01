@@ -152,12 +152,14 @@ def evaluate_str_builder_outputs(
         "metrics": metrics,
         "blocks": blocks,
         "log_metrics": {
-            "str/iou": _compute_iou(metrics),
-            "str/level_1": float(metrics.get("score_acc", 0.0)),
-            "str/level_2": -float(metrics.get("penalty_extra", 0.0)),
-            "str/level_3": -float(metrics.get("penalty_adj", 0.0)),
-            "str/level_4": -float(metrics.get("penalty_missing_palette", 0.0)),
-            "str/level_total": float(metrics.get("score_total", reward)),
+            "minecraft/iou": _compute_iou(metrics),
+            "minecraft/level_1": float(metrics.get("score_acc", 0.0)),
+            "minecraft/level_2": -float(metrics.get("penalty_extra", 0.0)),
+            "minecraft/level_3": -float(metrics.get("penalty_adj", 0.0)),
+            "minecraft/level_4": -float(
+                metrics.get("penalty_missing_palette", 0.0)
+            ),
+            "minecraft/score": reward,
         },
     }
 
