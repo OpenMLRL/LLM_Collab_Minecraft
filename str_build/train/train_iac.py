@@ -484,11 +484,12 @@ def main() -> int:
     trainer_kwargs["agent_model"] = model_name or None
     if agent_names:
         trainer_kwargs["agents"] = agent_names
-    critic_name = str(critic_model_cfg.get("name") or "").strip() or None
-    if critic_name:
-        trainer_kwargs["critic_model"] = critic_name
-    if critic_names:
-        trainer_kwargs["critics"] = critic_names
+    if bool(getattr(iac_args, "use_separate_critic", True)):
+        critic_name = str(critic_model_cfg.get("name") or "").strip() or None
+        if critic_name:
+            trainer_kwargs["critic_model"] = critic_name
+        if critic_names:
+            trainer_kwargs["critics"] = critic_names
     if reward_processor is not None:
         trainer_kwargs["reward_processor"] = reward_processor
 
