@@ -31,7 +31,10 @@ from LLM_Collab_Minecraft.str_build.external import (
     get_external_transition as external_get_transition,
     set_context_resolver as external_set_context_resolver,
 )
-from LLM_Collab_Minecraft.str_build.rewards.str_builder_reward import get_reward_function
+from LLM_Collab_Minecraft.str_build.rewards.str_builder_reward import (
+    build_str_eval_logging,
+    get_reward_function,
+)
 from LLM_Collab_Minecraft.str_build.utils.config import apply_overrides, load_yaml, resolve_path
 from LLM_Collab_Minecraft.str_build.utils.prompting import apply_graph_setting, apply_prompt_defaults
 from LLM_Collab_Minecraft.str_build.utils.str_builder import load_tasks_from_csv
@@ -399,6 +402,13 @@ def main() -> int:
         "wandb_config": wandb_config,
         "dataset_type": str(dataset_cfg.get("type") or "str_build"),
     }
+    trainer_kwargs.update(
+        build_str_eval_logging(
+            cfg=cfg,
+            num_agents=num_agents,
+            items=items,
+        )
+    )
     if reward_processor is not None:
         trainer_kwargs["reward_processor"] = reward_processor
 
