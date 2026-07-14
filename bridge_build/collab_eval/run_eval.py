@@ -15,6 +15,7 @@ matching the trainer's `eval/episode_success` rollup.
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import sys
 from typing import Any, Dict, List, Mapping
@@ -120,6 +121,16 @@ def _success_value(metrics: Mapping[str, Any]) -> float:
         return 0.0
 
 
+def _mean_std(scores: List[float]) -> tuple[float, float]:
+    """Return mean and sample std (ddof=1); std is 0.0 with fewer than 2 scores."""
+    n = len(scores)
+    mean = sum(scores) / float(n)
+    if n < 2:
+        return mean, 0.0
+    variance = sum((s - mean) ** 2 for s in scores) / float(n - 1)
+    return mean, math.sqrt(variance)
+
+
 def _run_parallel(item: Mapping[str, Any], *, adapter: Any, num_agents: int, num_turns: int, generate_fn: Any) -> float:
     payload = adapter.reset_item_state(item)
     previous_completions = ["" for _ in range(num_agents)]
@@ -187,6 +198,7 @@ def main() -> int:
     parser.add_argument("--mode", type=str, choices=["parallel", "pipeline"], required=True)
     parser.add_argument("--num-samples", type=int, default=50, help="Cap on number of eval episodes to run/print.")
     parser.add_argument("--num-rollouts", type=int, default=1, help="Stochastic rollouts per task; per-task score is averaged across rollouts.")
+    parser.add_argument("--seeds", type=str, default=None, help="Comma-separated seeds; runs the full eval once per seed and reports mean/std across seeds.")
     parser.add_argument("--device", type=str, default="cuda:0" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--override", type=str, nargs="*", default=None, help="key.path=value overrides for the config.")
     args = parser.parse_args()
@@ -275,23 +287,40 @@ def main() -> int:
         f"model={model_cfg.get('name')}"
     )
 
-    total = 0.0
-    for idx, item in enumerate(eval_items):
-        rollout_scores = [
-            float(runner(item, adapter=adapter, num_agents=num_agents, num_turns=num_turns, generate_fn=_generate_fn))
-            for _ in range(num_rollouts)
-        ]
-        score = sum(rollout_scores) / float(num_rollouts)
-        total += score
+    if args.seeds:
+        seed_list = [int(s) for s in str(args.seeds).split(",") if s.strip()]
+    else:
+        seed_list = [int(cfg.get("seed", 42))]
+
+    seed_means: List[float] = []
+    for seed in seed_list:
+        set_seed(seed)
+        total = 0.0
+        per_item_scores: List[float] = []
+        for idx, item in enumerate(eval_items):
+            rollout_scores = [
+                float(runner(item, adapter=adapter, num_agents=num_agents, num_turns=num_turns, generate_fn=_generate_fn))
+                for _ in range(num_rollouts)
+            ]
+            score = sum(rollout_scores) / float(num_rollouts)
+            per_item_scores.append(score)
+            total += score
+            log(
+                f"[collab_eval][seed={seed}][{idx + 1}/{len(eval_items)}] task_id={item.get('task_id')} "
+                f"episode_success={score:.6f} (rollouts={num_rollouts})"
+            )
+
+        mean, std = _mean_std(per_item_scores)
+        seed_means.append(mean)
         log(
-            f"[collab_eval][{idx + 1}/{len(eval_items)}] task_id={item.get('task_id')} "
-            f"episode_success={score:.6f} (rollouts={num_rollouts})"
+            f"[collab_eval][summary][seed={seed}] mode={args.mode} samples={len(eval_items)} rollouts={num_rollouts} "
+            f"episode_success: total={total:.6f} mean={mean:.6f} std={std:.6f}"
         )
 
-    mean = total / float(len(eval_items))
+    seeds_mean, seeds_std = _mean_std(seed_means)
     log(
-        f"[collab_eval][summary] mode={args.mode} samples={len(eval_items)} rollouts={num_rollouts} "
-        f"episode_success: total={total:.6f} mean={mean:.6f}"
+        f"[collab_eval][final] mode={args.mode} num_seeds={len(seed_list)} seeds={','.join(str(s) for s in seed_list)} "
+        f"episode_success: mean={seeds_mean:.6f} std={seeds_std:.6f} (across per-seed means)"
     )
     out_fh.close()
     return 0
