@@ -25,7 +25,9 @@ from transformers import AutoTokenizer  # type: ignore
 import torch  # type: ignore
 
 from comlrl.trainers.reinforce import MAGRPOTrainer  # type: ignore
+from comlrl.utils.distributed import unwrap_model  # type: ignore
 from comlrl.utils.reward_processor import RewardProcessors  # type: ignore
+from comlrl.utils.tokenizer_utils import apply_tokenizer_specials  # type: ignore
 
 from LLM_Collab_Minecraft.checkpoint_launch import parse_checkpoint_options, prepare_wandb_config
 from LLM_Collab_Minecraft.str_build.external import (
@@ -546,6 +548,11 @@ def main() -> int:
 
     trainer = MAGRPOTrainer(**trainer_kwargs)
     trainer.verbose = bool(output_verbose)
+    # CoMLRL copies the tokenizer's pad/eos ids into each model config at the
+    # first generation. Apply them before training so a resumed run's config
+    # matches the one its checkpoint saved.
+    for agent, agent_tokenizer in zip(trainer.agents, trainer.tokenizers):
+        apply_tokenizer_specials(agent_tokenizer, [unwrap_model(agent)])
     trainer.train(**checkpoint_options)
 
     if bool(output_cfg.get("save_final_model", False)):

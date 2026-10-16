@@ -144,7 +144,7 @@ ENTRIES = [
 ]
 
 
-def stub_launcher(monkeypatch, module_name, trainer_name, events):
+def stub_launcher(monkeypatch, module_name, trainer_name, events, agents=()):
     entry = importlib.import_module(module_name)
     real = getattr(entry, trainer_name)
     signature = inspect.signature(real.__init__)
@@ -154,7 +154,9 @@ def stub_launcher(monkeypatch, module_name, trainer_name, events):
         signature.bind(None, **kwargs)
         events.append(("construct", kwargs))
         return SimpleNamespace(
-            train=lambda **options: events.append(("train", options))
+            agents=[agent for agent, _ in agents],
+            tokenizers=[tokenizer for _, tokenizer in agents],
+            train=lambda **options: events.append(("train", options)),
         )
 
     monkeypatch.setattr(entry, trainer_name, create)
@@ -250,6 +252,41 @@ def test_all_launchers_resolve_logging_before_construction_and_forward_options(
     else:
         assert "id" not in logging and "resume" not in logging
     assert not (tmp_path / "checkpoints").exists()
+
+
+@pytest.mark.parametrize(
+    "module_name,trainer_name",
+    [entry for entry in ENTRIES if entry[1] == "MAGRPOTrainer"],
+)
+def test_magrpo_launchers_fix_model_config_before_training(
+    module_name, trainer_name, monkeypatch, tmp_path
+):
+    # CoMLRL writes tokenizer pad/eos ids into a model config at its first
+    # generation; resume validation runs before that, so launchers apply it first.
+    events = []
+    agents = [(SimpleNamespace(name=f"agent{i}"), f"tokenizer{i}") for i in range(2)]
+    entry = stub_launcher(monkeypatch, module_name, trainer_name, events, agents)
+    monkeypatch.setattr(
+        entry,
+        "apply_tokenizer_specials",
+        lambda tokenizer, models: events.append(("specials", tokenizer, models)),
+    )
+    overrides = [
+        f"output.base_dir={tmp_path}",
+        "output.save_final_model=false",
+        "wandb.enabled=false",
+    ]
+    monkeypatch.setattr(sys, "argv", ["train", "--override", *overrides])
+    assert entry.main() == 0
+    assert [event[0] for event in events] == [
+        "construct",
+        "specials",
+        "specials",
+        "train",
+    ]
+    assert [event[1:] for event in events[1:3]] == [
+        (tokenizer, [agent]) for agent, tokenizer in agents
+    ]
 
 
 @pytest.mark.parametrize("module_name,trainer_name", ENTRIES)
