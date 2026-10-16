@@ -28,6 +28,7 @@ import torch  # type: ignore
 from comlrl.trainers.reinforce import MAGRPOTrainer  # type: ignore
 from comlrl.utils.reward_processor import RewardProcessors  # type: ignore
 
+from LLM_Collab_Minecraft.checkpoint_launch import parse_checkpoint_options, prepare_wandb_config
 from LLM_Collab_Minecraft.house_build.external import (
     get_external_transition as external_get_transition,
     set_context_resolver as external_set_context_resolver,
@@ -448,6 +449,7 @@ def main() -> int:
     if override_items:
         cfg = apply_overrides(cfg, override_items)
     apply_prompt_defaults(cfg)
+    checkpoint_options = parse_checkpoint_options(cfg)
 
     magrpo_cfg = cfg.get("magrpo") or {}
     if not isinstance(magrpo_cfg, dict):
@@ -604,8 +606,7 @@ def main() -> int:
         "train_dataset": train_ds,
         "eval_dataset": eval_ds,
         "tokenizer": tokenizers if agent_names else tokenizer,
-        "wandb_config": wandb_config,
-        "dataset_type": str(dataset_cfg.get("type") or "house_build"),
+        "wandb_config": prepare_wandb_config(cfg, wandb_config, checkpoint_options),
     }
     trainer_kwargs.update(
         _build_house_eval_logging(
@@ -794,7 +795,7 @@ def main() -> int:
 
     trainer = MAGRPOTrainer(**trainer_kwargs)
     trainer.verbose = bool(output_verbose)
-    trainer.train()
+    trainer.train(**checkpoint_options)
 
     if bool(output_cfg.get("save_final_model", False)):
         save_path_cfg = output_cfg.get("save_path")

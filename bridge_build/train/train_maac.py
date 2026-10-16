@@ -28,6 +28,7 @@ import torch  # type: ignore
 from comlrl.trainers.actor_critic import MAACTrainer  # type: ignore
 from comlrl.utils.reward_processor import RewardProcessors  # type: ignore
 
+from LLM_Collab_Minecraft.checkpoint_launch import parse_checkpoint_options, prepare_wandb_config
 from LLM_Collab_Minecraft.bridge_build.external import (
     get_external_transition as external_get_transition,
     set_context_resolver as external_set_context_resolver,
@@ -287,6 +288,7 @@ def main() -> int:
     if override_items:
         cfg = apply_overrides(cfg, override_items)
     apply_prompt_defaults(cfg)
+    checkpoint_options = parse_checkpoint_options(cfg)
 
     maac_cfg = cfg.get("maac") or {}
     if not isinstance(maac_cfg, dict):
@@ -590,7 +592,7 @@ def main() -> int:
             "critic_model_kwargs": critic_model_kwargs,
             "critic_value_head_hidden_dim": maac_cfg.get("critic_value_head_hidden_dim"),
         },
-        "wandb_config": wandb_config,
+        "wandb_config": prepare_wandb_config(cfg, wandb_config, checkpoint_options),
     }
     trainer_kwargs["agent_model"] = model_name or None
     if agent_names:
@@ -684,7 +686,7 @@ def main() -> int:
 
     trainer = MAACTrainer(**trainer_kwargs)
     trainer.verbose = bool(output_verbose)
-    trainer.train()
+    trainer.train(**checkpoint_options)
 
     if bool(output_cfg.get("save_final_model", False)):
         save_path_cfg = output_cfg.get("save_path")
